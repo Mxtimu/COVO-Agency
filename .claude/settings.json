@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Skill(artifact-design)",
+      "Skill(artifact-design:*)",
+      "Bash(npm install *)",
+      "Read(//c/Users/matim/.claude/projects/c--Users-matim-OneDrive-Desktop-COVO/memory/**)",
+      "WebSearch"
+    ],
+    "additionalDirectories": [
+      "c:\\Users\\matim\\.claude\\projects\\c--Users-matim-OneDrive-Desktop-COVO\\memory"
+    ]
+  }
+}

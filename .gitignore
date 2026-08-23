@@ -1,0 +1,7 @@
+node_modules/
+dist/
+dist.zip
+.vercel
+.env
+.env.local
+.env.*.local
