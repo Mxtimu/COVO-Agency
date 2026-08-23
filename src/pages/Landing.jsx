@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
+import { supabase } from '../lib/supabase'
 
 /* ── NAV ── */
 function CovNav({ isLoggedIn, navigate }) {
@@ -354,13 +355,28 @@ function HowItWorksSection() {
 function WaitlistSection() {
   const [email, setEmail] = useState('')
   const [done, setDone]   = useState(false)
+  const [busy, setBusy]   = useState(false)
+  const [error, setError] = useState('')
 
-  function submit(e) {
+  async function submit(e) {
     e.preventDefault()
-    if (!email || !email.includes('@')) return
-    const list = JSON.parse(localStorage.getItem('covo_waitlist') || '[]')
-    list.push({ email, date: new Date().toISOString() })
-    localStorage.setItem('covo_waitlist', JSON.stringify(list))
+    const address = email.trim()
+    if (!address || !address.includes('@')) return setError('Please enter a valid email address.')
+
+    setBusy(true); setError('')
+    const { error: err } = await supabase.from('waitlist').insert({
+      email:      address,
+      source:     'landing',
+      user_agent: navigator.userAgent,
+    })
+    setBusy(false)
+
+    if (err) {
+      // 23505 = already on the list. Nothing has gone wrong from their side,
+      // so show the same confirmation rather than an error.
+      if (err.code === '23505') return setDone(true)
+      return setError('Something went wrong. Please try again.')
+    }
     setDone(true)
   }
 
@@ -378,19 +394,26 @@ function WaitlistSection() {
           You're on the list — we'll be in touch soon. ◆
         </p>
       ) : (
-        <form className="cov-waitlist__form" onSubmit={submit}>
-          <input
-            type="email"
-            placeholder="Your email address"
-            value={email}
-            onChange={e => setEmail(e.target.value)}
-            className="cov-waitlist__input"
-            required
-          />
-          <button type="submit" className="cov-btn cov-btn--sage cov-btn--lg">
-            Request Early Access
-          </button>
-        </form>
+        <>
+          <form className="cov-waitlist__form" onSubmit={submit}>
+            <input
+              type="email"
+              placeholder="Your email address"
+              value={email}
+              onChange={e => { setError(''); setEmail(e.target.value) }}
+              className="cov-waitlist__input"
+              required
+            />
+            <button type="submit" className="cov-btn cov-btn--sage cov-btn--lg" disabled={busy}>
+              {busy ? 'Adding you…' : 'Request Early Access'}
+            </button>
+          </form>
+          {error && (
+            <p className="cov-body-l" style={{ color: '#FCA5A5', marginTop: '.75rem', fontSize: '.9rem' }}>
+              {error}
+            </p>
+          )}
+        </>
       )}
     </section>
   )

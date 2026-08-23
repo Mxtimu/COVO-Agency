@@ -37,7 +37,17 @@ export default function AdminPayouts() {
     setLoading(false)
   }
 
+  // Disabled until Paystack is connected.
+  //
+  // This previously inserted a payout row and immediately set the matching
+  // commissions to 'paid'. No money moved — Paystack is not wired — so the
+  // creator's dashboard would show "paid out" against funds they had never
+  // received. Marking money as sent when it has not been is worse than
+  // having no button at all, so the whole path is closed rather than hidden.
+  const PAYOUTS_ENABLED = false
+
   async function initiatePayout(row) {
+    if (!PAYOUTS_ENABLED) return
     setBusy(b => ({ ...b, [row.creator_id]: true }))
     const { error } = await supabase.from('payouts').insert({
       creator_id:     row.creator_id,
@@ -46,10 +56,10 @@ export default function AdminPayouts() {
       initiated_by:   session?.user?.id,
       commission_ids: row.ids,
     })
-    if (!error) {
-      await supabase.from('commissions').update({ status: 'paid' }).in('id', row.ids)
-      await load()
-    }
+    // Commissions become 'paid' only when Paystack confirms the transfer,
+    // via the transfer.success branch of the paystack-webhook function.
+    if (error) alert(`Could not create payout: ${error.message}`)
+    else await load()
     setBusy(b => ({ ...b, [row.creator_id]: false }))
   }
 
@@ -72,9 +82,10 @@ export default function AdminPayouts() {
                   <div style={{ fontSize: '.75rem', color: 'var(--muted)' }}>{r.email} · {r.ids.length} commission{r.ids.length !== 1 ? 's' : ''}</div>
                 </div>
                 <div style={{ fontWeight: 800, fontSize: '1.1rem', color: 'var(--success)' }}>R{r.total.toFixed(2)}</div>
-                <button onClick={() => initiatePayout(r)} disabled={busy[r.creator_id]}
-                  style={{ background: 'var(--gradient)', border: 'none', color: 'white', padding: '.45rem 1.1rem', borderRadius: 8, cursor: 'pointer', fontWeight: 700, fontSize: '.82rem', fontFamily: 'var(--font-sans)' }}>
-                  {busy[r.creator_id] ? 'Processing…' : 'Initiate Payout'}
+                <button onClick={() => initiatePayout(r)} disabled={!PAYOUTS_ENABLED || busy[r.creator_id]}
+                  title={PAYOUTS_ENABLED ? '' : 'Payouts are disabled until Paystack is connected'}
+                  style={{ background: PAYOUTS_ENABLED ? 'var(--gradient)' : 'var(--dark3)', border: '1px solid var(--border)', color: PAYOUTS_ENABLED ? 'white' : 'var(--muted)', padding: '.45rem 1.1rem', borderRadius: 8, cursor: PAYOUTS_ENABLED ? 'pointer' : 'not-allowed', fontWeight: 700, fontSize: '.82rem', fontFamily: 'var(--font-sans)', whiteSpace: 'nowrap' }}>
+                  {busy[r.creator_id] ? 'Processing…' : PAYOUTS_ENABLED ? 'Initiate Payout' : 'Awaiting Paystack'}
                 </button>
               </div>
             ))}

@@ -2,8 +2,6 @@ import { useState, useEffect } from 'react'
 import { useNavigate, useSearchParams, Link } from 'react-router-dom'
 import { useApp } from '../context/AppContext'
 import {
-  signInWithGoogle,
-  signInWithFacebook,
   signUpBrand,
   signInBrand,
   signUpCreator,
@@ -78,8 +76,6 @@ export default function Auth() {
   function switchToSignup() { setIntent('signup'); setUserType(null); setError(''); setInfo(''); setView('form'); setCreatorEmail(false) }
 
   // ── Auth handlers ──────────────────────────────────────────────────────────
-  async function handleGoogle()   { setBusy(true); const { error } = await signInWithGoogle();   if (error) { setError(authErrorMessage(error)); setBusy(false) } }
-  async function handleFacebook() { setBusy(true); const { error } = await signInWithFacebook(); if (error) { setError(authErrorMessage(error)); setBusy(false) } }
 
   async function brandRegister(e) {
     e.preventDefault()
@@ -286,29 +282,18 @@ export default function Auth() {
 
       {!creatorEmail ? (
         <>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '.65rem', marginBottom: '1.25rem' }}>
-            <button className="social-btn-lg" onClick={handleGoogle} disabled={busy}>
-              <span className="s-icon-lg">G</span>Continue with Google
-            </button>
-            <button className="social-btn-lg" onClick={handleFacebook} disabled={busy}>
-              <span className="s-icon-lg">f</span>Continue with Facebook
-            </button>
-            <button className="social-btn-lg" disabled style={{ opacity: .38, cursor: 'not-allowed' }}>
-              <span className="s-icon-lg">T</span>
-              Continue with TikTok
-              <span style={{ marginLeft: 'auto', fontSize: '.72rem', color: 'var(--muted)', fontWeight: 400 }}>Coming soon</span>
-            </button>
-          </div>
-
-          <div className="divider"><hr /><span>or use email</span><hr /></div>
-
+          {/* Social sign-in is deliberately absent.
+              Facebook and TikTok were never configured on the Supabase project
+              and would have failed on click. Google worked, but is held back so
+              social login ships as one reviewed piece rather than one provider
+              at a time — a half-present row of options reads as broken. */}
           <button className="social-btn-lg" style={{ marginBottom: '1.25rem' }} onClick={() => { setCreatorEmail(true); setError(''); setInfo('') }}>
             <span className="s-icon-lg">@</span>Continue with Email
           </button>
 
           <div className="auth-creator-note">
             <Icon name="lock" size={14} />
-            <p>COVO uses OAuth — we never see or store your social media password. Your account stays fully yours.</p>
+            <p>Your password is encrypted and never visible to COVO or to the brands you work with.</p>
           </div>
 
           <p style={{ textAlign: 'center', marginTop: '1.25rem', fontSize: '.84rem', color: 'var(--muted)' }}>

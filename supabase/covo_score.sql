@@ -10,6 +10,10 @@
 --   Average order     15 pts — do they bring buyers who spend?
 --   Reliability       20 pts — returns and disputes against them
 --
+-- Conversion, order value and reliability are scaled by a confidence
+-- factor that grows to full at 20 sales, so a score has to be earned
+-- with evidence rather than won on one lucky click.
+--
 -- A creator with no history scores 0 and reads as "unproven" rather than
 -- "bad" in the UI.
 --
@@ -30,6 +34,7 @@ DECLARE
   _avg_order   NUMERIC;
   _conv_rate   NUMERIC;
   _score       NUMERIC := 0;
+  _confidence  NUMERIC := 0;
 BEGIN
   SELECT COUNT(*) INTO _clicks FROM public.clicks WHERE creator_id = p_creator;
 
@@ -49,26 +54,37 @@ BEGIN
     RETURN 0;
   END IF;
 
+  -- ── Confidence ────────────────────────────────────────────────────
+  -- How much the evidence is worth believing. Two sales tell you almost
+  -- nothing about a creator; twenty tell you a great deal. Without this,
+  -- one lucky sale off three clicks reads as a 100% conversion rate and
+  -- saturates the score — a creator with 2 sales would rank alongside one
+  -- with 200, which is the first thing a brand would notice.
+  _confidence := LEAST(1.0, _sales::NUMERIC / 20.0);
+
   -- ── Conversion rate: 40 pts, full marks at 5% ─────────────────────
-  -- 2-3% is a strong affiliate conversion rate, so 5% is deliberately
-  -- generous headroom rather than a target anyone must hit.
+  -- Smoothed toward a 2% industry prior with 200 pseudo-clicks of inertia,
+  -- so an extreme rate from a tiny sample is pulled back toward normal and
+  -- only earns its keep once real traffic backs it up.
   IF _clicks > 0 THEN
-    _conv_rate := _sales::NUMERIC / _clicks;
+    _conv_rate := (_sales::NUMERIC + 0.02 * 200) / (_clicks::NUMERIC + 200);
     _score := _score + LEAST(40, (_conv_rate / 0.05) * 40);
   END IF;
 
   -- ── Volume: 25 pts, full marks at 50 sales ────────────────────────
   -- Logarithmic: the difference between 1 and 10 sales says far more
-  -- about reliability than the difference between 40 and 50.
+  -- about reliability than the difference between 40 and 50. This is the
+  -- evidence itself, so it is deliberately not confidence-scaled.
   IF _sales > 0 THEN
     _score := _score + LEAST(25, (LN(_sales + 1) / LN(51)) * 25);
   END IF;
 
   -- ── Average order value: 15 pts, full marks at R2 000 ─────────────
-  _score := _score + LEAST(15, (_avg_order / 2000) * 15);
+  _score := _score + LEAST(15, (_avg_order / 2000) * 15) * _confidence;
 
   -- ── Reliability: 20 pts, lost to denials and disputes ─────────────
-  -- Starts full and is deducted from, so a clean record is the default.
+  -- Also confidence-scaled: a clean record over two sales is not yet
+  -- evidence of reliability, so it cannot bank the full twenty points.
   DECLARE
     _reliability NUMERIC := 20;
     _total       INT := _sales + _denied;
@@ -76,6 +92,8 @@ BEGIN
     IF _total > 0 THEN
       _reliability := _reliability - (_denied::NUMERIC / _total) * 15;
     END IF;
+    _reliability := _reliability * _confidence;
+    -- Penalties are NOT scaled — a dispute counts fully from day one.
     _reliability := _reliability - LEAST(10, _disputes * 5);
     _score := _score + GREATEST(0, _reliability);
   END;
