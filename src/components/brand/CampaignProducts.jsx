@@ -12,6 +12,8 @@ export default function CampaignProducts({ campaignId }) {
   const [busy,     setBusy]     = useState(false)
   const [error,    setError]    = useState('')
   const [form,     setForm]     = useState({ name: '', price: '', tracking_url: '' })
+  const [editing,  setEditing]  = useState(null)   // product id being edited
+  const [editForm, setEditForm] = useState({ name: '', price: '', tracking_url: '' })
 
   useEffect(() => { load() }, [campaignId])
 
@@ -54,8 +56,48 @@ export default function CampaignProducts({ campaignId }) {
     load()
   }
 
+  // Shared by add and edit so both accept "shop.co.za/item" and store it usable.
+  function normaliseUrl(raw) {
+    let url = (raw ?? '').trim()
+    if (!url) return { error: 'Please enter the product page URL.' }
+    if (!/^https?:\/\//i.test(url)) url = `https://${url}`
+    try { new URL(url) } catch { return { error: 'That does not look like a valid URL.' } }
+    return { url }
+  }
+
+  function startEdit(p) {
+    setError('')
+    setEditing(p.id)
+    setEditForm({
+      name:         p.name ?? '',
+      price:        p.price != null ? String(p.price) : '',
+      tracking_url: p.tracking_url ?? '',
+    })
+  }
+
+  const setE = k => e => { setError(''); setEditForm(f => ({ ...f, [k]: e.target.value })) }
+
+  async function saveEdit(id) {
+    if (!editForm.name.trim()) return setError('Please enter a product name.')
+    const { url, error: urlError } = normaliseUrl(editForm.tracking_url)
+    if (urlError) return setError(urlError)
+    if (editForm.price && isNaN(Number(editForm.price))) return setError('Price must be a number.')
+
+    setBusy(true); setError('')
+    const { error } = await supabase.from('products').update({
+      name:         editForm.name.trim(),
+      price:        editForm.price ? Number(editForm.price) : null,
+      tracking_url: url,
+    }).eq('id', id)
+    setBusy(false)
+
+    if (error) return setError(error.message)
+    setEditing(null)
+    load()
+  }
+
   async function removeProduct(id) {
-    if (!confirm('Remove this product? Any affiliate links pointing to it will stop working.')) return
+    if (!confirm('Remove this product? Every creator link pointing at it will stop working immediately. To correct a detail, use Edit instead — that keeps existing links working.')) return
     const { error } = await supabase.from('products').delete().eq('id', id)
     if (error) return alert(error.message)
     load()
@@ -83,7 +125,23 @@ export default function CampaignProducts({ campaignId }) {
         </p>
       )}
 
-      {products.map(p => (
+      {products.map(p => editing === p.id ? (
+        <div key={p.id} style={{ display: 'grid', gap: '.5rem', padding: '.6rem 0', borderBottom: '1px solid var(--border)' }}>
+          <input value={editForm.name} onChange={setE('name')} placeholder="Product name" style={inputStyle} />
+          <input value={editForm.price} onChange={setE('price')} placeholder="Price in ZAR (optional)" inputMode="decimal" style={inputStyle} />
+          <input value={editForm.tracking_url} onChange={setE('tracking_url')} placeholder="Product page URL" style={inputStyle} />
+          <div style={{ display: 'flex', gap: '.4rem' }}>
+            <button onClick={() => saveEdit(p.id)} disabled={busy}
+              style={{ background: 'var(--gradient)', border: 'none', color: 'white', padding: '.35rem .9rem', borderRadius: 7, cursor: busy ? 'wait' : 'pointer', fontWeight: 700, fontSize: '.76rem' }}>
+              {busy ? 'Saving…' : 'Save'}
+            </button>
+            <button onClick={() => { setEditing(null); setError('') }}
+              style={{ background: 'transparent', border: '1px solid var(--border)', color: 'var(--muted)', padding: '.35rem .9rem', borderRadius: 7, cursor: 'pointer', fontSize: '.76rem' }}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      ) : (
         <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: '.75rem', padding: '.4rem 0', borderBottom: '1px solid var(--border)', fontSize: '.8rem' }}>
           <span style={{ fontWeight: 600, flex: 1 }}>{p.name}</span>
           <span style={{ color: 'var(--muted)', fontVariantNumeric: 'tabular-nums' }}>
@@ -93,8 +151,11 @@ export default function CampaignProducts({ campaignId }) {
              style={{ color: 'var(--sage)', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             {p.tracking_url}
           </a>
+          <button onClick={() => startEdit(p)}
+            style={{ background: 'transparent', border: 'none', color: 'var(--sage)', cursor: 'pointer', fontSize: '.74rem', fontWeight: 600 }}
+            title="Edit product">Edit</button>
           <button onClick={() => removeProduct(p.id)}
-            style={{ background: 'transparent', border: 'none', color: 'var(--muted)', cursor: 'pointer', fontSize: '.9rem' }}
+            style={{ background: 'transparent', border: 'none', color: 'var(--muted)', cursor: 'pointer' }}
             title="Remove product"><Icon name="close" size={14} /></button>
         </div>
       ))}

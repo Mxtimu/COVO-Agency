@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useApp } from '../context/AppContext'
 import Overview    from '../components/dashboard/Overview'
@@ -8,6 +8,7 @@ import Links       from '../components/dashboard/Links'
 import Earnings    from '../components/dashboard/Earnings'
 import DashProfile from '../components/dashboard/DashProfile'
 import Icon        from '../components/ui/Icon'
+import { fetchCreatorStats, formatZAR } from '../lib/api/creator'
 
 const PANELS = [
   { id: 'overview',   icon: 'overview',   label: 'Overview'   },
@@ -21,7 +22,7 @@ const TITLES = { overview: 'Overview', campaigns: 'Campaigns', storefront: 'Stor
 
 export default function Dashboard() {
   const navigate = useNavigate()
-  const { user, profile, links, saveLinks, joined, saveJoined, logout } = useApp()
+  const { user, profile, links, saveLinks, joined, saveJoined, logout, session } = useApp()
 
   const [active,      setActive]      = useState('overview')
   const [sidebarOpen, setSidebarOpen] = useState(false)
@@ -48,7 +49,17 @@ export default function Dashboard() {
   const fullName  = `${user?.first || ''} ${user?.last || ''}`.trim() || 'Creator'
   const roleLabel = profile?.role === 'brand' ? 'Brand' : 'Creator'
 
-  const totalEarnings = 531.50
+  // The wallet chip follows the creator around every panel, so it reads the
+  // same figures Earnings does rather than carrying its own number.
+  const [walletTotal, setWalletTotal] = useState(null)
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      const s = await fetchCreatorStats(session?.user?.id)
+      if (!cancelled) setWalletTotal(s?.available ?? 0)
+    })()
+    return () => { cancelled = true }
+  }, [session?.user?.id, active])
 
   return (
     <div className="db-layout">
@@ -107,18 +118,18 @@ export default function Dashboard() {
             <div className="topbar-title">{TITLES[active]}</div>
           </div>
           <div className="topbar-right">
-            <div className="wallet-chip"><Icon name="money" size={15} /> R{totalEarnings.toFixed(2)}</div>
+            <div className="wallet-chip" title="Available to withdraw"><Icon name="money" size={15} /> {walletTotal === null ? '—' : formatZAR(walletTotal)}</div>
             <div className="notif-btn"><Icon name="bell" size={17} /></div>
             <button className="topbar-logout" onClick={handleLogout} title="Log out"><Icon name="logout" size={16} /></button>
           </div>
         </header>
 
         <div className="db-content">
-          {active === 'overview'   && <Overview   user={user} links={links} joined={joined} showPanel={setActive} showToast={showToast} />}
+          {active === 'overview'   && <Overview   user={user} showPanel={setActive} showToast={showToast} />}
           {active === 'campaigns'  && <Campaigns  showToast={showToast} />}
-          {active === 'storefront' && <Storefront user={user} links={links} saveLinks={saveLinks} showToast={showToast} />}
+          {active === 'storefront' && <Storefront showToast={showToast} showPanel={setActive} />}
           {active === 'links'      && <Links      showToast={showToast} showPanel={setActive} />}
-          {active === 'earnings'   && <Earnings   links={links} showToast={showToast} />}
+          {active === 'earnings'   && <Earnings   showToast={showToast} />}
           {active === 'profile'    && <DashProfile user={user} profile={profile} />}
         </div>
       </div>

@@ -94,6 +94,16 @@ export function authErrorMessage(error) {
   if (copy) return copy
 
   const msg = typeof error.message === 'string' ? error.message.trim() : ''
+
+  // Supabase returns a 500 when the confirmation email cannot be delivered,
+  // and rolls the auth.users row back with it — verified by signing the same
+  // address up twice and getting 500 both times rather than "already exists".
+  // So no account is created and the address stays free to retry. Saying the
+  // service is down would be wrong; so would implying the account exists.
+  if (/confirmation email|error sending/i.test(msg)) {
+    return 'We could not send your confirmation email, so your account was not created. Please try again shortly, or contact support@covo.africa if it keeps happening.'
+  }
+
   if (error.name === 'AuthRetryableFetchError' || !msg || msg === '{}') {
     return error.status === 0
       ? "Couldn't reach the server. Check your connection and try again."

@@ -1,26 +1,39 @@
+import { useState, useEffect } from 'react'
+import { useApp } from '../../context/AppContext'
+import { fetchCreatorStats, formatZAR, timeAgo } from '../../lib/api/creator'
 import Icon from '../ui/Icon'
-export default function Overview({ user, links, joined, showPanel }) {
-  const hour   = new Date().getHours()
-  const greet  = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening'
 
-  const activeCampaigns = 2 + joined.length
-  const totalClicks     = 1247
-  const convRate        = 4.2
+export default function Overview({ user, showPanel }) {
+  const { session } = useApp()
+  const [stats,   setStats]   = useState(null)
+  const [loading, setLoading] = useState(true)
 
-  const ACTIVITIES = [
-    { icon: 'storefront', text: 'Nike Air Zoom sale via your link',      sub: '2 hours ago · 1 conversion',       amount: '+R419.85',    cls: 'c-success' },
-    { icon: 'links', text: 'Gymshark link — 47 new clicks',         sub: '5 hours ago',                       amount: '0 conv.',     cls: 'c-muted'   },
-    { icon: 'earnings', text: 'Commission paid out to wallet',         sub: 'Yesterday · Whoop campaign',        amount: '+R6,241.50',  cls: 'c-success' },
-    { icon: 'campaigns', text: 'Invited to Ritual Vitamins campaign',   sub: '2 days ago · 20% commission',       amount: 'Pending',     cls: 'c-warning' },
-    { icon: 'storefront', text: 'Myprotein Impact Whey sale',           sub: '3 days ago · 2 conversions',        amount: '+R219.60',    cls: 'c-success' },
-  ]
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      setLoading(true)
+      const s = await fetchCreatorStats(session?.user?.id)
+      if (!cancelled) { setStats(s); setLoading(false) }
+    })()
+    return () => { cancelled = true }
+  }, [session?.user?.id])
 
-  const BARS = [
-    { label: 'Whoop 4.0',     amount: 'R6,241.50', pct: 65 },
-    { label: 'Nike Spring',   amount: 'R2,099.25', pct: 21 },
-    { label: 'Myprotein',     amount: 'R1,197.60', pct: 12 },
-    { label: 'Gymshark',      amount: 'R219.60',   pct: 2  },
-  ]
+  const hour  = new Date().getHours()
+  const greet = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening'
+
+  if (loading) {
+    return (
+      <>
+        <div className="greeting">
+          <h1>{greet}, {user?.first || 'there'}</h1>
+          <p>Loading your numbers…</p>
+        </div>
+      </>
+    )
+  }
+
+  const activity = (stats?.commissions ?? []).slice(0, 6)
+  const hasData  = (stats?.conversions ?? 0) > 0 || (stats?.clicks ?? 0) > 0
 
   return (
     <>
@@ -32,63 +45,105 @@ export default function Overview({ user, links, joined, showPanel }) {
       <div className="stats-grid">
         <div className="stat-card">
           <div className="stat-card-label"><Icon name="earnings" size={14} /> Total Earnings</div>
-          <div className="stat-card-val green">R9,715.50</div>
-          <div className="stat-card-delta"><Icon name="up" size={12} /> +R1,650.00 this week</div>
+          <div className="stat-card-val green">{formatZAR(stats?.totalEarned)}</div>
+          <div className="stat-card-delta">
+            {stats?.pending > 0 ? `${formatZAR(stats.pending)} still clearing` : 'All commissions cleared'}
+          </div>
         </div>
         <div className="stat-card">
           <div className="stat-card-label"><Icon name="campaigns" size={14} /> Active Campaigns</div>
-          <div className="stat-card-val purple">{activeCampaigns}</div>
-          <div className="stat-card-delta">{Math.max(0, 6 - joined.length)} new available</div>
+          <div className="stat-card-val purple">{stats?.activeCampaigns ?? 0}</div>
+          <div className="stat-card-delta">
+            <span className="see-all" onClick={() => showPanel('campaigns')}>Browse more →</span>
+          </div>
         </div>
         <div className="stat-card">
           <div className="stat-card-label"><Icon name="clicks" size={14} /> Total Clicks</div>
-          <div className="stat-card-val">{(totalClicks + links.length * 47).toLocaleString()}</div>
-          <div className="stat-card-delta"><Icon name="up" size={12} /> +142 this week</div>
+          <div className="stat-card-val">{(stats?.clicks ?? 0).toLocaleString('en-ZA')}</div>
+          <div className="stat-card-delta">
+            {stats?.conversions ?? 0} conversion{stats?.conversions === 1 ? '' : 's'}
+          </div>
         </div>
         <div className="stat-card">
           <div className="stat-card-label"><Icon name="target" size={14} /> Conversion Rate</div>
-          <div className="stat-card-val">{convRate}%</div>
-          <div className="stat-card-delta down">↓ -0.3% vs last week</div>
-        </div>
-      </div>
-
-      <div className="two-col">
-        <div className="panel-section">
-          <h3>
-            Recent Activity
-            <span className="see-all" onClick={() => showPanel('links')}>View links →</span>
-          </h3>
-          <div className="activity-list">
-            {ACTIVITIES.map((a, i) => (
-              <div className="activity-item" key={i}>
-                <div className="activity-icon"><Icon name={a.icon} size={16} /></div>
-                <div className="activity-body">
-                  <p>{a.text}</p>
-                  <span>{a.sub}</span>
-                </div>
-                <span className={`activity-amount ${a.cls}`}>{a.amount}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        <div className="panel-section">
-          <h3>Earnings by Campaign</h3>
-          <div className="earnings-bar-wrap">
-            {BARS.map(b => (
-              <div className="earn-row" key={b.label}>
-                <div className="earn-row-top">
-                  <span>{b.label}</span>
-                  <span>{b.amount}</span>
-                </div>
-                <div className="bar-track">
-                  <div className="bar-fill" style={{ width: `${b.pct}%` }} />
-                </div>
-              </div>
-            ))}
+          <div className="stat-card-val">{(stats?.convRate ?? 0).toFixed(1)}%</div>
+          <div className="stat-card-delta">
+            {stats?.clicks ? 'Of all link clicks' : 'No clicks yet'}
           </div>
         </div>
       </div>
+
+      {!hasData && (
+        <div className="panel-section" style={{ textAlign: 'center', padding: '2.5rem 1rem' }}>
+          <Icon name="campaigns" size={36} style={{ opacity: .5, marginBottom: '.75rem' }} />
+          <p style={{ fontWeight: 600, color: 'var(--warm-white)', marginBottom: '.35rem' }}>
+            No activity yet
+          </p>
+          <p style={{ fontSize: '.875rem', color: 'var(--muted)', marginBottom: '1rem' }}>
+            Apply to a campaign, and once you're approved your links appear here ready to share.
+          </p>
+          <button className="btn-sm btn-primary" style={{ borderRadius: 8 }} onClick={() => showPanel('campaigns')}>
+            Browse campaigns
+          </button>
+        </div>
+      )}
+
+      {hasData && (
+        <div className="two-col">
+          <div className="panel-section">
+            <h3>
+              Recent Activity
+              <span className="see-all" onClick={() => showPanel('links')}>View links →</span>
+            </h3>
+            {activity.length === 0 ? (
+              <p style={{ color: 'var(--muted)', fontSize: '.85rem' }}>
+                Your links have clicks but no sales yet. Commissions appear here as they come in.
+              </p>
+            ) : (
+              <div className="activity-list">
+                {activity.map(c => {
+                  const campaign = Array.isArray(c.campaigns) ? c.campaigns[0] : c.campaigns
+                  const cls = c.status === 'paid' || c.status === 'confirmed' ? 'c-success'
+                            : c.status === 'denied' ? 'c-muted' : 'c-warning'
+                  return (
+                    <div className="activity-item" key={c.id}>
+                      <div className="activity-icon"><Icon name="storefront" size={16} /></div>
+                      <div className="activity-body">
+                        <p>Sale via {campaign?.title ?? 'your link'}</p>
+                        <span>{timeAgo(c.created_at)} · {formatZAR(c.sale_amount)} order · {c.status}</span>
+                      </div>
+                      <span className={`activity-amount ${cls}`}>
+                        {c.status === 'denied' ? '—' : `+${formatZAR(c.net_commission)}`}
+                      </span>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+
+          <div className="panel-section">
+            <h3>Earnings by Campaign</h3>
+            {(stats?.byCampaign ?? []).length === 0 ? (
+              <p style={{ color: 'var(--muted)', fontSize: '.85rem' }}>No earnings yet.</p>
+            ) : (
+              <div className="earnings-bar-wrap">
+                {stats.byCampaign.map(b => (
+                  <div className="earn-row" key={b.id}>
+                    <div className="earn-row-top">
+                      <span>{b.label}</span>
+                      <span>{formatZAR(b.amount)}</span>
+                    </div>
+                    <div className="bar-track">
+                      <div className="bar-fill" style={{ width: `${b.pct}%` }} />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </>
   )
 }
