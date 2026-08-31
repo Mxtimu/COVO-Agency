@@ -4,6 +4,18 @@ import { supabase } from '../supabase'
 // payout fees proportionate to the amount being moved.
 export const MIN_PAYOUT = 250
 
+// Paystack transfers are not wired yet, so nothing can actually move money.
+// AdminPayouts already refused to create payout rows for that reason, but the
+// creator-facing button stayed live: a creator could request a withdrawal,
+// watch their available balance drop by it — requestPayout() reserves the
+// commissions — and then wait indefinitely for a transfer no code path can
+// initiate. Showing someone their money leaving for a queue nobody drains is
+// worse than telling them payouts are not open yet.
+//
+// One flag, read by both sides, so they cannot drift apart again. Flip it when
+// the Paystack transfer integration lands.
+export const PAYOUTS_ENABLED = false
+
 const one = v => (Array.isArray(v) ? v[0] : v)
 
 // Everything the creator dashboard needs, in one round trip per table.

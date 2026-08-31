@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../../../lib/supabase'
 import { useApp } from '../../../context/AppContext'
+import { PAYOUTS_ENABLED } from '../../../lib/api/creator'
 
 export default function AdminPayouts() {
   const { session } = useApp()
@@ -44,7 +45,11 @@ export default function AdminPayouts() {
   // creator's dashboard would show "paid out" against funds they had never
   // received. Marking money as sent when it has not been is worse than
   // having no button at all, so the whole path is closed rather than hidden.
-  const PAYOUTS_ENABLED = false
+  //
+  // The flag lives in lib/api/creator.js because the creator's own Request
+  // Payout button reads it too. It was declared locally here, so the two
+  // sides disagreed: this panel refused to process payouts while Earnings
+  // happily let creators request them.
 
   async function initiatePayout(row) {
     if (!PAYOUTS_ENABLED) return

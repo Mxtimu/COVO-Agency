@@ -1,14 +1,22 @@
+import { lazy, Suspense } from 'react'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { AppProvider, useApp } from './context/AppContext'
-import Landing        from './pages/Landing'
-import Auth           from './pages/Auth'
-import Onboarding     from './pages/Onboarding'
-import BrandOnboarding from './pages/BrandOnboarding'
-import Dashboard      from './pages/Dashboard'
-import BrandDashboard from './pages/BrandDashboard'
-import AuthCallback   from './pages/auth/AuthCallback'
-import AdminDashboard from './pages/admin/AdminDashboard'
-import AdminLogin     from './pages/auth/AdminLogin'
+
+// Landing and Auth are the two ways in, so they stay in the entry chunk —
+// lazy-loading them would only add a round trip before first paint.
+import Landing      from './pages/Landing'
+import Auth         from './pages/Auth'
+import AuthCallback from './pages/auth/AuthCallback'
+
+// Everything behind a login is loaded on demand. A visitor reading the
+// marketing page has no use for three dashboards and seven admin panels, and
+// was downloading all of them anyway.
+const Onboarding      = lazy(() => import('./pages/Onboarding'))
+const BrandOnboarding = lazy(() => import('./pages/BrandOnboarding'))
+const Dashboard       = lazy(() => import('./pages/Dashboard'))
+const BrandDashboard  = lazy(() => import('./pages/BrandDashboard'))
+const AdminDashboard  = lazy(() => import('./pages/admin/AdminDashboard'))
+const AdminLogin      = lazy(() => import('./pages/auth/AdminLogin'))
 
 function PrivateRoute({ children }) {
   const { session, loading } = useApp()
@@ -49,6 +57,10 @@ export default function App() {
   return (
     <AppProvider>
       <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+        {/* The route guards already render null while auth resolves, so a
+            lazy chunk arriving a moment later shows the same blank frame
+            rather than a spinner that flashes on every fast navigation. */}
+        <Suspense fallback={null}>
         <Routes>
           <Route path="/"                  element={<Landing />} />
           <Route path="/auth"              element={<Auth />} />
@@ -74,6 +86,7 @@ export default function App() {
 
           <Route path="*"                  element={<Navigate to="/" replace />} />
         </Routes>
+        </Suspense>
       </BrowserRouter>
     </AppProvider>
   )

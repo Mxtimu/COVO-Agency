@@ -35,6 +35,26 @@ serve(async (req) => {
     return new Response('This link is not ready yet', { status: 404 })
   }
 
+  // tracking_url is typed in by a brand, and this function will send anyone
+  // who clicks a creator's link wherever it points. The storefront form
+  // normalises what it accepts, but the column is reachable from any brand's
+  // session, so the scheme is checked here too — at the point of use, where
+  // it actually matters. javascript: and data: URLs are the ones worth
+  // caring about; a brand that could store one would have every creator on
+  // its campaign handing their audience a hostile link under COVO's name.
+  let target: URL
+  try {
+    target = new URL(dest)
+  } catch {
+    console.error('unparseable tracking_url on link', link.id)
+    return new Response('This link is not ready yet', { status: 404 })
+  }
+
+  if (target.protocol !== 'https:' && target.protocol !== 'http:') {
+    console.error('rejected non-http tracking_url on link', link.id, target.protocol)
+    return new Response('This link is not ready yet', { status: 404 })
+  }
+
   // Awaited deliberately. Edge runtimes tear down the isolate as soon as the
   // response is returned, so a fire-and-forget insert loses clicks silently
   // and intermittently — the attribution data has to be worth trusting.
@@ -55,7 +75,6 @@ serve(async (req) => {
   // this function's domain, and the brand's Shopify store runs on its own
   // domain — it could never read it. The storefront snippet picks covo_ref off
   // the landing URL and persists it in the shop's own first-party storage.
-  const target = new URL(dest)
   target.searchParams.set('covo_ref', link.id)
 
   return new Response(null, {

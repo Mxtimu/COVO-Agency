@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useApp } from '../../context/AppContext'
-import { fetchCreatorStats, requestPayout, formatZAR, MIN_PAYOUT } from '../../lib/api/creator'
+import { fetchCreatorStats, requestPayout, formatZAR, MIN_PAYOUT, PAYOUTS_ENABLED } from '../../lib/api/creator'
 import Icon from '../ui/Icon'
 
 const STATUS_COPY = {
@@ -27,6 +27,7 @@ export default function Earnings({ showToast }) {
   }
 
   async function onRequestPayout() {
+    if (!PAYOUTS_ENABLED) return
     if (!stats) return
     if (stats.available < MIN_PAYOUT) {
       return setError(`You need at least ${formatZAR(MIN_PAYOUT)} cleared before withdrawing.`)
@@ -43,7 +44,7 @@ export default function Earnings({ showToast }) {
 
   if (loading) return <p style={{ color: 'var(--muted)' }}>Loading your earnings…</p>
 
-  const canWithdraw = (stats?.available ?? 0) >= MIN_PAYOUT
+  const canWithdraw = PAYOUTS_ENABLED && (stats?.available ?? 0) >= MIN_PAYOUT
   const history     = stats?.commissions ?? []
 
   return (
@@ -55,11 +56,27 @@ export default function Earnings({ showToast }) {
           onClick={onRequestPayout}
           disabled={!canWithdraw || busy}
           style={!canWithdraw ? { opacity: .45, cursor: 'not-allowed' } : undefined}
-          title={canWithdraw ? '' : `Minimum ${formatZAR(MIN_PAYOUT)} required`}
+          title={
+            !PAYOUTS_ENABLED ? 'Withdrawals open once COVO payouts go live'
+              : canWithdraw ? ''
+              : `Minimum ${formatZAR(MIN_PAYOUT)} required`
+          }
         >
-          {busy ? 'Requesting…' : `Request Payout${canWithdraw ? ` · ${formatZAR(stats.available)}` : ''}`}
+          {!PAYOUTS_ENABLED ? 'Withdrawals opening soon'
+            : busy ? 'Requesting…'
+            : `Request Payout${canWithdraw ? ` · ${formatZAR(stats.available)}` : ''}`}
         </button>
       </div>
+
+      {/* Their earnings are real and still accruing — say so plainly rather
+          than leaving a greyed-out button to be read as something broken. */}
+      {!PAYOUTS_ENABLED && (
+        <div style={{ background: 'rgba(245,158,11,.08)', border: '1px solid rgba(245,158,11,.25)', color: 'var(--warning)', padding: '.7rem 1rem', borderRadius: 8, marginBottom: '1rem', fontSize: '.82rem', lineHeight: 1.55 }}>
+          Withdrawals aren't open yet — we're finalising payouts with our payment
+          provider. Your commissions keep accruing and clearing as normal, and
+          everything you've earned will be waiting when they open.
+        </div>
+      )}
 
       {error && (
         <div style={{ background: 'rgba(239,68,68,.1)', border: '1px solid rgba(239,68,68,.3)', color: '#FCA5A5', padding: '.7rem 1rem', borderRadius: 8, marginBottom: '1rem', fontSize: '.82rem' }}>

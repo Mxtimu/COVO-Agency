@@ -77,7 +77,7 @@ export default function BrandDashboard() {
         </header>
 
         <div className="db-content">
-          {active === 'overview'  && <BrandOverview  />}
+          {active === 'overview'  && <BrandOverview  showPanel={go} />}
           {active === 'campaigns' && <BrandCampaigns />}
           {active === 'creators'  && <BrandCreators  />}
           {active === 'payments'  && <BrandPayments  />}

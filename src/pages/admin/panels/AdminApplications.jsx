@@ -22,7 +22,7 @@ export default function AdminApplications() {
       .from('campaign_applications')
       .select(`
         id, status, created_at, reviewed_at, campaign_id, creator_id,
-        profiles:creator_id(full_name, email, creator_profiles(covo_score, is_verified, follower_count, niche)),
+        profiles:creator_id(full_name, email, creator_profiles(covo_score, is_verified, follower_count)),
         campaigns:campaign_id(title, commission_rate, brand_id)
       `)
       .order('created_at', { ascending: false })

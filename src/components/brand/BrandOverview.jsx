@@ -3,53 +3,68 @@ import { useApp } from '../../context/AppContext'
 import { supabase } from '../../lib/supabase'
 import Icon from '../ui/Icon'
 
-export default function BrandOverview() {
+export default function BrandOverview({ showPanel }) {
   const { session, profile } = useApp()
-  const [stats,   setStats]   = useState({ campaigns: 0, creators: 0, clicks: 0, commissions: 0 })
+  const [stats,   setStats]   = useState({ campaigns: 0, creators: 0, clicks: 0, owed: 0 })
   const [recent,  setRecent]  = useState([])
   const [loading, setLoading] = useState(true)
 
   const bp = Array.isArray(profile?.brand_profiles) ? profile.brand_profiles[0] : profile?.brand_profiles
   const company = bp?.company_name || profile?.full_name || 'Brand'
 
-  useEffect(() => { load() }, [])
+  useEffect(() => { load() }, [session?.user?.id])
 
   async function load() {
     setLoading(true)
     const uid = session?.user?.id
     if (!uid) { setLoading(false); return }
 
-    const [campRes, commRes] = await Promise.all([
-      supabase.from('campaigns').select('id, title, status').eq('brand_id', uid),
+    // The campaign ids gate every other query, so this one is awaited on its
+    // own rather than hidden inside a Promise.all that cannot actually run in
+    // parallel around it.
+    const { data: campaigns } = await supabase
+      .from('campaigns').select('id, title, status').eq('brand_id', uid)
+
+    const campIds = (campaigns ?? []).map(c => c.id)
+
+    if (!campIds.length) {
+      setStats({ campaigns: 0, creators: 0, clicks: 0, owed: 0 })
+      setRecent([])
+      setLoading(false)
+      return
+    }
+
+    const [{ count: clicks }, { data: links }, { data: owedRows }, { data: comms }] = await Promise.all([
+      // head:true — the count comes back in a header, so no rows cross the wire.
+      supabase.from('clicks').select('id', { count: 'exact', head: true }).in('campaign_id', campIds),
+      supabase.from('affiliate_links').select('creator_id').in('campaign_id', campIds),
+      // Owed is what this brand still has to pay: 'paid' is already settled
+      // and 'denied' never becomes payable, so summing every status — which
+      // is what this tile used to do — overstated the liability permanently.
+      supabase.from('commissions').select('net_commission')
+        .in('campaign_id', campIds).in('status', ['pending', 'confirmed']),
       supabase.from('commissions')
         .select('id, net_commission, status, created_at, profiles(full_name)')
-        .in('campaign_id',
-          await supabase.from('campaigns').select('id').eq('brand_id', uid)
-            .then(r => (r.data ?? []).map(c => c.id))
-        )
+        .in('campaign_id', campIds)
         .order('created_at', { ascending: false })
         .limit(5),
     ])
 
-    const campaigns = campRes.data ?? []
-    const comms     = commRes.data ?? []
-
-    const totalComm = comms.reduce((s, c) => s + Number(c.net_commission || 0), 0)
-
     setStats({
-      campaigns:   campaigns.length,
-      creators:    0,
-      clicks:      0,
-      commissions: totalComm,
+      campaigns: (campaigns ?? []).filter(c => c.status === 'active').length,
+      creators:  new Set((links ?? []).map(l => l.creator_id)).size,
+      clicks:    clicks ?? 0,
+      owed:      (owedRows ?? []).reduce((s, c) => s + Number(c.net_commission || 0), 0),
     })
-    setRecent(comms)
+    setRecent(comms ?? [])
     setLoading(false)
   }
 
   const STATS = [
     { label: 'Active Campaigns', value: stats.campaigns, color: 'var(--sage)' },
-    { label: 'Total Clicks',     value: stats.clicks,     color: 'var(--lilac)' },
-    { label: 'Commissions Owed', value: `R${stats.commissions.toFixed(2)}`, color: 'var(--warning)' },
+    { label: 'Creators Working With You', value: stats.creators, color: 'var(--lilac)' },
+    { label: 'Total Clicks',     value: stats.clicks.toLocaleString('en-ZA'), color: 'var(--tan)' },
+    { label: 'Commissions Owed', value: `R${stats.owed.toFixed(2)}`, color: 'var(--warning)' },
   ]
 
   const STATUS_COLOR = {
@@ -69,7 +84,7 @@ export default function BrandOverview() {
         </div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '1rem', marginBottom: '1.5rem' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: '1rem', marginBottom: '1.5rem' }}>
         {STATS.map(s => (
           <div key={s.label} className="panel-section" style={{ padding: '1.25rem 1.5rem' }}>
             <div style={{ fontSize: '.75rem', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.08em', marginBottom: '.5rem' }}>{s.label}</div>
@@ -106,16 +121,27 @@ export default function BrandOverview() {
 
       <div className="panel-section" style={{ marginTop: '1rem' }}>
         <h3 style={{ marginBottom: '.75rem' }}>Quick actions</h3>
+        {/* These were divs with cursor:pointer and no handler — they looked
+            clickable and did nothing. Now they are buttons that navigate. */}
         <div style={{ display: 'flex', gap: '.65rem', flexWrap: 'wrap' }}>
-          <div style={{ padding: '.75rem 1.25rem', background: 'rgba(195,206,148,.08)', border: '1px solid rgba(195,206,148,.2)', borderRadius: 10, fontSize: '.84rem', color: 'var(--sage)', cursor: 'pointer', fontWeight: 600 }}>
+          <button
+            onClick={() => showPanel?.('campaigns')}
+            style={{ padding: '.75rem 1.25rem', background: 'rgba(195,206,148,.08)', border: '1px solid rgba(195,206,148,.2)', borderRadius: 10, fontSize: '.84rem', color: 'var(--sage)', cursor: 'pointer', fontWeight: 600, fontFamily: 'var(--font-sans)' }}
+          >
             + Create campaign
-          </div>
-          <div style={{ padding: '.75rem 1.25rem', background: 'var(--dark3)', border: '1px solid var(--border)', borderRadius: 10, fontSize: '.84rem', color: 'var(--warm-white)', cursor: 'pointer' }}>
+          </button>
+          <button
+            onClick={() => showPanel?.('payments')}
+            style={{ padding: '.75rem 1.25rem', background: 'var(--dark3)', border: '1px solid var(--border)', borderRadius: 10, fontSize: '.84rem', color: 'var(--warm-white)', cursor: 'pointer', fontFamily: 'var(--font-sans)' }}
+          >
             Add escrow funds
-          </div>
-          <div style={{ padding: '.75rem 1.25rem', background: 'var(--dark3)', border: '1px solid var(--border)', borderRadius: 10, fontSize: '.84rem', color: 'var(--warm-white)', cursor: 'pointer' }}>
+          </button>
+          <button
+            onClick={() => showPanel?.('creators')}
+            style={{ padding: '.75rem 1.25rem', background: 'var(--dark3)', border: '1px solid var(--border)', borderRadius: 10, fontSize: '.84rem', color: 'var(--warm-white)', cursor: 'pointer', fontFamily: 'var(--font-sans)' }}
+          >
             View creators
-          </div>
+          </button>
         </div>
       </div>
     </>
