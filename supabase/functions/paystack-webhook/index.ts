@@ -24,12 +24,18 @@ serve(async (req) => {
     const ref    = event.data.reference as string
     const amount = event.data.amount / 100  // Paystack sends in kobo/cents
 
+    // Paystack retries a webhook until it gets a 200, and will redeliver
+    // after a timeout even when the first attempt succeeded. Matching on
+    // the reference alone returned the tranche every time, so a retry
+    // credited the escrow twice. Claiming the row by moving it out of
+    // 'pending' makes the second delivery match nothing.
     const { data: tranche } = await supabase
       .from('escrow_tranches')
       .update({ paystack_status: 'success', deposited_at: new Date().toISOString() })
       .eq('paystack_reference', ref)
+      .eq('paystack_status', 'pending')
       .select('escrow_id, amount')
-      .single()
+      .maybeSingle()
 
     if (tranche) {
       // Add to escrow balance
@@ -38,16 +44,27 @@ serve(async (req) => {
         p_amount:    amount,
       })
 
-      // Check if campaign was paused due to low balance — resume it
       const { data: escrow } = await supabase
         .from('campaign_escrow')
         .select('balance, status, campaign_id')
         .eq('id', tranche.escrow_id)
         .single()
 
-      if (escrow && escrow.status === 'paused' && escrow.balance >= 500) {
-        await supabase.from('campaign_escrow').update({ status: 'active' }).eq('id', tranche.escrow_id)
-        await supabase.from('campaigns').update({ status: 'active' }).eq('id', escrow.campaign_id)
+      if (escrow) {
+        // Commissions earned while the campaign was underfunded were
+        // parked as 'held'. This deposit is what pays for them, so
+        // release what it covers — oldest creator first — before
+        // deciding whether the campaign can reopen.
+        const { error: releaseError } = await supabase.rpc('release_held_commissions', {
+          p_campaign_id: escrow.campaign_id,
+        })
+        if (releaseError) console.error('release_held_commissions failed:', releaseError.message)
+
+        // Check if campaign was paused due to low balance — resume it
+        if (escrow.status === 'paused' && escrow.balance >= 500) {
+          await supabase.from('campaign_escrow').update({ status: 'active' }).eq('id', tranche.escrow_id)
+          await supabase.from('campaigns').update({ status: 'active' }).eq('id', escrow.campaign_id)
+        }
       }
     }
   }
@@ -63,9 +80,13 @@ serve(async (req) => {
     const { data: payout } = await supabase
       .from('payouts').select('commission_ids').eq('paystack_reference', ref).single()
     if (payout?.commission_ids?.length) {
+      // Only confirmed commissions become paid. Without the status filter
+      // a redelivered transfer.success could drag a commission that had
+      // since been disputed and denied back into 'paid'.
       await supabase.from('commissions')
         .update({ status: 'paid' })
         .in('id', payout.commission_ids)
+        .eq('status', 'confirmed')
     }
   }
 

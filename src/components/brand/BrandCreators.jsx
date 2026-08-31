@@ -23,15 +23,24 @@ export default function BrandCreators() {
 
     if (campIds.length === 0) { setRows([]); setLoading(false); return }
 
+    // creator_profiles is fetched separately: affiliate_links.creator_id is
+    // a FK to profiles, so PostgREST cannot embed creator_profiles through
+    // it — the same reason campaigns cannot embed brand_profiles.
     const { data: links } = await supabase
       .from('affiliate_links')
-      .select('id, creator_id, campaign_id, short_code, discount_code, profiles(full_name, email), creator_profiles(covo_score, is_verified)')
+      .select('id, creator_id, campaign_id, slug, discount_code, profiles(full_name, email)')
       .in('campaign_id', campIds)
 
-    const { data: comms } = await supabase
-      .from('commissions')
-      .select('creator_id, net_commission, status')
-      .in('campaign_id', campIds)
+    const creatorIds = [...new Set((links ?? []).map(l => l.creator_id).filter(Boolean))]
+
+    const [{ data: creatorProfiles }, { data: comms }] = await Promise.all([
+      creatorIds.length
+        ? supabase.from('creator_profiles').select('id, covo_score, is_verified').in('id', creatorIds)
+        : Promise.resolve({ data: [] }),
+      supabase.from('commissions').select('creator_id, net_commission, status').in('campaign_id', campIds),
+    ])
+
+    const scoreMap = Object.fromEntries((creatorProfiles ?? []).map(p => [p.id, p]))
 
     // Aggregate earnings per creator
     const earningsMap = {}
@@ -44,9 +53,9 @@ export default function BrandCreators() {
 
     setRows((links ?? []).map(l => ({
       ...l,
-      campaign_title: campMap[l.campaign_id] || '—',
-      earned: earningsMap[l.creator_id] || 0,
-      creator_profile: Array.isArray(l.creator_profiles) ? l.creator_profiles[0] : l.creator_profiles,
+      campaign_title:  campMap[l.campaign_id] || '—',
+      earned:          earningsMap[l.creator_id] || 0,
+      creator_profile: scoreMap[l.creator_id] ?? null,
     })))
     setLoading(false)
   }
@@ -89,8 +98,12 @@ export default function BrandCreators() {
                       </div>
                     </td>
                     <td style={{ padding: '.75rem 1rem' }}>
-                      {r.short_code
-                        ? <code style={{ fontSize: '.75rem', color: 'var(--lilac)', background: 'rgba(210,184,242,.08)', padding: '.15rem .45rem', borderRadius: 5 }}>covo.africa/r/{r.short_code}</code>
+                      {/* The slug, not a covo.africa/r/ URL — that domain does
+                          not serve redirects. The live link is the Edge
+                          Function the creator copies; the brand only needs to
+                          tell one creator's link from another. */}
+                      {r.slug
+                        ? <code style={{ fontSize: '.75rem', color: 'var(--lilac)', background: 'rgba(210,184,242,.08)', padding: '.15rem .45rem', borderRadius: 5 }}>{r.slug}</code>
                         : <span style={{ color: 'var(--muted)' }}>—</span>}
                     </td>
                     <td style={{ padding: '.75rem 1rem' }}>
