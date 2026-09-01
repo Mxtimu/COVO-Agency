@@ -119,31 +119,8 @@ $verify$;
 ROLLBACK;
 
 
--- ── Static checks, no transaction needed ─────────────────────────────
--- The guards must be SECURITY INVOKER. A DEFINER guard sees current_user
--- as its own owner on every write, so is_direct_client_write() reads
--- false even for a browser and every check above silently passes through.
-SELECT p.proname AS guard,
-       CASE WHEN p.prosecdef THEN '✗ SECURITY DEFINER — guard will never fire'
-            ELSE '✓ SECURITY INVOKER' END AS verdict
-FROM pg_proc p
-JOIN pg_namespace n ON n.oid = p.pronamespace
-WHERE n.nspname = 'public'
-  AND p.proname IN ('guard_profile_privileges',
-                    'guard_creator_profile_privileges',
-                    'guard_campaign_status')
-ORDER BY p.proname;
-
--- The shop registry must have RLS on and no policies at all, or a brand's
--- own session could read the secret that signs its webhooks.
-SELECT c.relname AS table_name,
-       c.relrowsecurity AS rls_enabled,
-       COUNT(pol.polname) AS policy_count,
-       CASE WHEN c.relrowsecurity AND COUNT(pol.polname) = 0
-            THEN '✓ service_role only'
-            ELSE '✗ webhook_secret is reachable from a browser session' END AS verdict
-FROM pg_class c
-JOIN pg_namespace n ON n.oid = c.relnamespace
-LEFT JOIN pg_policy pol ON pol.polrelid = c.oid
-WHERE n.nspname = 'public' AND c.relname = 'shopify_shops'
-GROUP BY c.relname, c.relrowsecurity;
+-- ── Static checks ────────────────────────────────────────────────────
+-- Moved to verify_checks.sql. They were two separate SELECTs here, and the
+-- Supabase SQL Editor renders only the last statement's result — so the
+-- guard check, the one that actually matters, was invisible. verify_checks.sql
+-- returns every check as rows of one result set instead.
