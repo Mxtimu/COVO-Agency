@@ -7,6 +7,8 @@ import Icon from '../ui/Icon'
 // links — which is why this sits directly under each campaign row.
 export default function CampaignProducts({ campaignId }) {
   const [products, setProducts] = useState([])
+  const [usage,    setUsage]    = useState({})   // product_id → counts
+  const [showArchived, setShowArchived] = useState(false)
   const [loading,  setLoading]  = useState(true)
   const [adding,   setAdding]   = useState(false)
   const [busy,     setBusy]     = useState(false)
@@ -19,12 +21,20 @@ export default function CampaignProducts({ campaignId }) {
 
   async function load() {
     setLoading(true)
-    const { data } = await supabase
-      .from('products')
-      .select('id, name, price, tracking_url, created_at')
-      .eq('campaign_id', campaignId)
-      .order('created_at', { ascending: false })
+    // Usage counts come alongside the products themselves: a brand deciding
+    // whether to remove something needs to see what it is carrying first.
+    // Deleting used to be a confirm() dialog that could not tell you whether
+    // you were about to break one creator or forty.
+    const [{ data }, { data: usageRows }] = await Promise.all([
+      supabase
+        .from('products')
+        .select('id, name, price, tracking_url, created_at, archived_at')
+        .eq('campaign_id', campaignId)
+        .order('created_at', { ascending: false }),
+      supabase.rpc('product_usage', { p_campaign_id: campaignId }),
+    ])
     setProducts(data ?? [])
+    setUsage(Object.fromEntries((usageRows ?? []).map(u => [u.product_id, u])))
     setLoading(false)
   }
 
@@ -96,20 +106,65 @@ export default function CampaignProducts({ campaignId }) {
     load()
   }
 
-  async function removeProduct(id) {
-    if (!confirm('Remove this product? Every creator link pointing at it will stop working immediately. To correct a detail, use Edit instead — that keeps existing links working.')) return
-    const { error } = await supabase.from('products').delete().eq('id', id)
-    if (error) return alert(error.message)
+  // Retiring a product that creators are already carrying. Their links keep
+  // resolving and past sales keep their product reference; it just stops
+  // being offered to anyone new. This is the safe path, and for anything
+  // with history it is the only one the database will allow.
+  async function archiveProduct(p) {
+    const u = usage[p.id]
+    const carrying = u?.links
+      ? `${u.links} creator link${u.links === 1 ? '' : 's'} will keep working, and ${u.commissions} recorded sale${u.commissions === 1 ? '' : 's'} keep their product.`
+      : 'Nothing is linking to it yet.'
+
+    if (!confirm(`Archive "${p.name}"?\n\n${carrying}\n\nCreators stop seeing it and no new links will be generated for it. You can restore it at any time.`)) return
+
+    setBusy(true); setError('')
+    const { error } = await supabase.from('products')
+      .update({ archived_at: new Date().toISOString() }).eq('id', p.id)
+    setBusy(false)
+    if (error) return setError(error.message)
+    load()
+  }
+
+  async function restoreProduct(p) {
+    setBusy(true); setError('')
+    const { error } = await supabase.from('products')
+      .update({ archived_at: null }).eq('id', p.id)
+    setBusy(false)
+    if (error) return setError(error.message)
+    load()
+  }
+
+  // Hard delete, kept only for a product nothing references — the genuine
+  // "I typed that in wrong a second ago" case. Anything with history is
+  // refused by guard_product_delete() in the database regardless of what
+  // this function does, so the message below explains rather than gates.
+  async function removeProduct(p) {
+    const u = usage[p.id]
+    if (u && !u.can_delete) {
+      return setError(`"${p.name}" has ${u.links} creator link(s) and ${u.commissions} sale(s). Archive it instead — deleting would break those links and erase which product each sale was for.`)
+    }
+    if (!confirm(`Delete "${p.name}"? Nothing is linking to it yet, so nothing breaks.`)) return
+
+    setBusy(true); setError('')
+    const { error } = await supabase.from('products').delete().eq('id', p.id)
+    setBusy(false)
+    // The trigger raises if something started referencing it between the
+    // check above and this call.
+    if (error) return setError(error.message)
     load()
   }
 
   if (loading) return <p style={{ color: 'var(--muted)', fontSize: '.8rem', margin: 0 }}>Loading products…</p>
 
+  const active   = products.filter(p => !p.archived_at)
+  const archived = products.filter(p =>  p.archived_at)
+
   return (
     <div style={{ padding: '.75rem 0' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '.6rem' }}>
         <span style={{ fontSize: '.72rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.06em', color: 'var(--muted)' }}>
-          Products ({products.length})
+          Products ({active.length})
         </span>
         <button
           onClick={() => { setAdding(a => !a); setError('') }}
@@ -119,13 +174,19 @@ export default function CampaignProducts({ campaignId }) {
         </button>
       </div>
 
-      {products.length === 0 && !adding && (
+      {active.length === 0 && !adding && (
         <p style={{ color: 'var(--muted)', fontSize: '.78rem', margin: 0 }}>
-          No products yet. Creators can't generate links until this campaign has at least one.
+          {archived.length > 0
+            ? 'No products on offer. Restore an archived one below, or add a new one.'
+            : "No products yet. Creators can't generate links until this campaign has at least one."}
         </p>
       )}
 
-      {products.map(p => editing === p.id ? (
+      {error && !adding && editing === null && (
+        <p style={{ color: '#FCA5A5', fontSize: '.76rem', margin: '.35rem 0' }}>{error}</p>
+      )}
+
+      {active.map(p => editing === p.id ? (
         <div key={p.id} style={{ display: 'grid', gap: '.5rem', padding: '.6rem 0', borderBottom: '1px solid var(--border)' }}>
           <input value={editForm.name} onChange={setE('name')} placeholder="Product name" style={inputStyle} />
           <input value={editForm.price} onChange={setE('price')} placeholder="Price in ZAR (optional)" inputMode="decimal" style={inputStyle} />
@@ -151,14 +212,51 @@ export default function CampaignProducts({ campaignId }) {
              style={{ color: 'var(--sage)', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             {p.tracking_url}
           </a>
+          {/* What this product is carrying, so removing it is never a
+              guess. Silence here is what made deletion dangerous. */}
+          {usage[p.id]?.links > 0 && (
+            <span style={{ color: 'var(--muted)', fontSize: '.72rem', whiteSpace: 'nowrap' }} title={`${usage[p.id].creators} creator(s), ${usage[p.id].clicks} clicks, ${usage[p.id].commissions} sales`}>
+              {usage[p.id].links} link{usage[p.id].links === 1 ? '' : 's'} · {usage[p.id].clicks} click{usage[p.id].clicks === 1 ? '' : 's'}
+            </span>
+          )}
           <button onClick={() => startEdit(p)}
             style={{ background: 'transparent', border: 'none', color: 'var(--sage)', cursor: 'pointer', fontSize: '.74rem', fontWeight: 600 }}
-            title="Edit product">Edit</button>
-          <button onClick={() => removeProduct(p.id)}
-            style={{ background: 'transparent', border: 'none', color: 'var(--muted)', cursor: 'pointer' }}
-            title="Remove product"><Icon name="close" size={14} /></button>
+            title="Edit product — keeps every existing link working">Edit</button>
+          {usage[p.id]?.can_delete === false ? (
+            <button onClick={() => archiveProduct(p)} disabled={busy}
+              style={{ background: 'transparent', border: 'none', color: 'var(--muted)', cursor: 'pointer', fontSize: '.74rem', fontWeight: 600 }}
+              title="Stop offering this product — existing creator links keep working">Archive</button>
+          ) : (
+            <button onClick={() => removeProduct(p)} disabled={busy}
+              style={{ background: 'transparent', border: 'none', color: 'var(--muted)', cursor: 'pointer' }}
+              title="Delete — nothing is linking to this yet"><Icon name="close" size={14} /></button>
+          )}
         </div>
       ))}
+
+      {/* Archived — out of the way, but restorable. */}
+      {archived.length > 0 && (
+        <div style={{ marginTop: '.75rem' }}>
+          <button
+            onClick={() => setShowArchived(s => !s)}
+            style={{ background: 'none', border: 'none', color: 'var(--muted)', cursor: 'pointer', fontSize: '.72rem', fontWeight: 600, padding: 0 }}
+          >
+            {showArchived ? '▾' : '▸'} Archived ({archived.length})
+          </button>
+
+          {showArchived && archived.map(p => (
+            <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: '.75rem', padding: '.4rem 0', borderBottom: '1px solid var(--border)', fontSize: '.8rem', opacity: .65 }}>
+              <span style={{ flex: 1, textDecoration: 'line-through' }}>{p.name}</span>
+              <span style={{ color: 'var(--muted)', fontSize: '.72rem' }}>
+                {usage[p.id]?.links ?? 0} link{usage[p.id]?.links === 1 ? '' : 's'} still resolving
+              </span>
+              <button onClick={() => restoreProduct(p)} disabled={busy}
+                style={{ background: 'transparent', border: 'none', color: 'var(--sage)', cursor: 'pointer', fontSize: '.74rem', fontWeight: 600 }}
+                title="Offer this product to creators again">Restore</button>
+            </div>
+          ))}
+        </div>
+      )}
 
       {adding && (
         <form onSubmit={addProduct} style={{ display: 'grid', gap: '.5rem', marginTop: '.75rem' }}>

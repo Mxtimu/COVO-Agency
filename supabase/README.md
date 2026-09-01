@@ -28,6 +28,7 @@ and the other became a no-op, which is how `commissions` ended up without the
 | 10 | **`security_hardening.sql`** | **Privilege guards — see below** |
 | 11 | `escrow_release.sql` | Held-commission release, solvent confirmation, cron |
 | 12 | `shopify_integration.sql` | Shop registry, conversion write, refunds |
+| 13 | `product_lifecycle.sql` | Product archiving; refuses deletes that would orphan links |
 | — | `verify_checks.sql` | **Run this after any change.** Every check as one result set. |
 | — | `verify_hardening.sql` | Runtime proof the guards reject a browser write. Rolls itself back. |
 

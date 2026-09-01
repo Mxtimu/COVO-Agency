@@ -31,6 +31,17 @@ serve(async (req) => {
   const product = Array.isArray(link.products) ? link.products[0] : link.products
   const dest    = product?.tracking_url
 
+  // An archived product still redirects — retiring one is not meant to
+  // break the links creators have already shared. A NULL product_id is a
+  // different thing entirely: the product was hard-deleted, which set the
+  // reference to NULL and orphaned this link permanently. That is no longer
+  // possible for a product with links, but links orphaned before
+  // guard_product_delete() existed are still out there being shared.
+  if (!link.product_id) {
+    console.error('orphaned link — product was deleted:', link.id)
+    return new Response('This product is no longer available', { status: 404 })
+  }
+
   if (!dest) {
     return new Response('This link is not ready yet', { status: 404 })
   }

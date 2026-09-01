@@ -72,13 +72,18 @@ serve(async (req) => {
     // Fall back to every product on the campaign when none are specified.
     let productIds: string[] = product_ids ?? []
     if (!productIds.length) {
+      // Archived products are retired, not deleted — their existing links
+      // keep resolving, but minting new ones would point creators at
+      // something the brand has stopped offering.
       const { data: products } = await supabase
-        .from('products').select('id').eq('campaign_id', campaign_id)
+        .from('products').select('id')
+        .eq('campaign_id', campaign_id)
+        .is('archived_at', null)
       productIds = (products ?? []).map(p => p.id)
     }
 
     if (!productIds.length) {
-      return json({ error: 'This campaign has no products to link to yet.' }, 400)
+      return json({ error: 'This campaign has no products available to link to. Any it had have been archived.' }, 400)
     }
 
     const links = []
