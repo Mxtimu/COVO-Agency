@@ -86,19 +86,26 @@ use `npx`, and pass `--project-ref` so no `config.toml` is needed:
 npx supabase functions deploy <name> --no-verify-jwt --project-ref nyeulzucksldwlcrbbmo
 ```
 
-| Function | JWT | Notes |
+| Function | Who may call it | Enforced by |
 |---|---|---|
-| `shopify-order-webhook` | `--no-verify-jwt` | Authorised by Shopify's HMAC instead |
-| `paystack-webhook` | `--no-verify-jwt` | Authorised by Paystack's HMAC instead |
-| `affiliate-redirect` | `--no-verify-jwt` | Public by design |
-| `generate-affiliate-assets` | `--no-verify-jwt` | Checks admin role itself; the gate would reject the CORS preflight |
-| `commission-confirmation` | default | Admin-triggered manual run |
-| `record-conversion` | — | **Retired.** Returns 410. Delete once no storefront calls it. |
+| `shopify-order-webhook` | Shopify only | HMAC-SHA256 over the raw body |
+| `paystack-webhook` | Paystack only | HMAC-SHA512 over the raw body |
+| `affiliate-redirect` | anyone | public by design; validates the slug and URL scheme |
+| `generate-affiliate-assets` | admins | reads `profiles.role` with the service role |
+| `commission-confirmation` | admins | reads `profiles.role` with the service role |
+| `record-conversion` | nobody | **retired**, returns 410. Delete once no storefront calls it |
 
-Third-party webhooks cannot present a Supabase JWT, so the platform gate would
-reject them before their signature check ever ran. `--no-verify-jwt` is not a
-weakening there — an HMAC over the body is strictly stronger than proof the
-caller held *some* valid token.
+Every one is deployed with `verify_jwt` off, and that is deliberate rather
+than an oversight: **the platform's JWT gate accepts the anon key**, which is
+published in the client bundle. It proves the caller holds *a* token, not that
+they are anyone in particular, so it was never meaningful protection for any of
+these — and for the two third-party webhooks it actively breaks them, since
+neither Shopify nor Paystack can present a Supabase JWT.
+
+Authorisation therefore lives inside each function, where it can be specific.
+`commission-confirmation` shipped with none at all and `verify_jwt` off, which
+made it a public endpoint that drew down brand escrow; it now checks for an
+admin.
 
 ## Money invariants
 
