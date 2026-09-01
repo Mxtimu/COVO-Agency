@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { supabase } from '../../lib/supabase'
 import { useApp } from '../../context/AppContext'
+import CovoScore from './CovoScore'
 import Icon from '../ui/Icon'
 
 const ALL_NICHES = [
@@ -120,6 +121,13 @@ export default function DashProfile({ user, profile }) {
   return (
     <>
       <h2 style={{ fontSize: '1.3rem', fontWeight: 800, letterSpacing: '-.015em', marginBottom: '1.5rem' }}>My Profile</h2>
+
+      {/* Above the fold, and full width. Brands and admins could see this
+          number from the day it was built; the creator it describes could
+          not see it anywhere. */}
+      <div style={{ marginBottom: '1.25rem' }}>
+        <CovoScore />
+      </div>
 
       <div className="two-col">
 

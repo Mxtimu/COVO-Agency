@@ -22,6 +22,7 @@ and the other became a no-op, which is how `commissions` ended up without the
 | 5 | `escrow_functions.sql` | Escrow balance RPCs; renames `short_code`→`slug` |
 | 6 | `conversion_tracking.sql` | Order reference + the replay constraint |
 | 7 | `covo_score.sql` | Score calculation, trigger, nightly job |
+| 7b | `covo_score_breakdown.sql` | Splits the score into its components; must follow 7 |
 | 8 | `creator_payouts.sql` | `request_creator_payout()` |
 | 9 | `waitlist.sql` | Landing-page waitlist |
 | 10 | **`security_hardening.sql`** | **Privilege guards — see below** |

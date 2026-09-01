@@ -4,9 +4,15 @@ import { fetchCreatorStats, formatZAR, timeAgo } from '../../lib/api/creator'
 import Icon from '../ui/Icon'
 
 export default function Overview({ user, showPanel }) {
-  const { session } = useApp()
+  const { session, profile } = useApp()
   const [stats,   setStats]   = useState(null)
   const [loading, setLoading] = useState(true)
+
+  // Read off the profile useAuth already loaded rather than issuing another
+  // query — the stored score is what brands see, and it is refreshed on
+  // every commission change plus nightly.
+  const cp        = Array.isArray(profile?.creator_profiles) ? profile.creator_profiles[0] : profile?.creator_profiles
+  const covoScore = cp?.covo_score ?? 0
 
   useEffect(() => {
     let cancelled = false
@@ -42,7 +48,19 @@ export default function Overview({ user, showPanel }) {
         <p>Here's what's happening with your account today.</p>
       </div>
 
-      <div className="stats-grid">
+      <div className="stats-grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(200px,1fr))' }}>
+        <div className="stat-card">
+          <div className="stat-card-label"><Icon name="score" size={14} /> COVO Score</div>
+          <div className="stat-card-val" style={{ color: covoScore >= 70 ? 'var(--success)' : covoScore >= 40 ? 'var(--sage)' : 'var(--muted)' }}>
+            {covoScore > 0 ? covoScore : '—'}
+            {covoScore > 0 && <span style={{ fontSize: '.9rem', color: 'var(--muted)', fontWeight: 600 }}>/100</span>}
+          </div>
+          <div className="stat-card-delta">
+            <span className="see-all" onClick={() => showPanel('profile')}>
+              {covoScore > 0 ? 'See the breakdown →' : 'How this works →'}
+            </span>
+          </div>
+        </div>
         <div className="stat-card">
           <div className="stat-card-label"><Icon name="earnings" size={14} /> Total Earnings</div>
           <div className="stat-card-val green">{formatZAR(stats?.totalEarned)}</div>
