@@ -1,36 +1,5 @@
 -- ════════════════════════════════════════════════════════════════════
--- COVO — count a click once per visitor
---
--- Every link showed roughly double the clicks it had really had.
---
--- affiliate-redirect inserts exactly one row per invocation, and nothing
--- else writes to clicks — so the count was not wrong, the function was
--- simply being invoked twice for one human. serve() accepted any method
--- with no guard, so:
---
---   * a HEAD followed by a GET is two rows, and that is precisely what a
---     link-preview crawler does — which is the normal path for a creator
---     link, since it is shared into WhatsApp, Slack or iMessage before
---     anyone clicks it;
---   * Chrome speculatively prefetches a URL it thinks you are about to
---     visit, then fetches it again when you actually do.
---
--- The method and prefetch filtering lives in the Edge Function, where the
--- headers are. This is the second half: a real visitor who double-taps,
--- refreshes, or is re-sent through the redirect still counts once.
---
--- The dedupe key is (link, ip_hash) inside a short window. Two people
--- behind one NAT clicking the same link within 30 seconds will therefore
--- count once — that is a real cost, accepted because inflating a
--- creator's traffic is the worse error: it feeds the conversion rate
--- that drives 40 points of their COVO Score, so double-counting clicks
--- silently deflates every creator's score.
---
--- Idempotent: safe to re-run.
--- ════════════════════════════════════════════════════════════════════
-
--- Supports the NOT EXISTS lookup below. Without it every redirect would
--- scan the clicks table.
+-- 
 CREATE INDEX IF NOT EXISTS idx_clicks_dedupe
   ON public.clicks (affiliate_link_id, ip_hash, clicked_at DESC);
 

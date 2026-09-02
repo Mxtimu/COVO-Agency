@@ -57,12 +57,19 @@ DROP POLICY IF EXISTS "admins manage shopify shops" ON public.shopify_shops;
 
 
 -- ── Admin management, without ever handing back the secret ───────────
+-- The OUT columns are deliberately NOT named shop_domain or brand_id.
+-- RETURNS TABLE puts those names in scope as variables, and the ON CONFLICT
+-- target below is an expression over the column of the same name — which
+-- would make it ambiguous and fail on the first call. Dropped first because
+-- CREATE OR REPLACE cannot rename an OUT parameter.
+DROP FUNCTION IF EXISTS public.admin_link_shopify_shop(UUID, TEXT, TEXT);
+
 CREATE OR REPLACE FUNCTION public.admin_link_shopify_shop(
   p_brand_id       UUID,
   p_shop_domain    TEXT,
   p_webhook_secret TEXT
 )
-RETURNS TABLE (shop_id UUID, shop_domain TEXT, brand_id UUID)
+RETURNS TABLE (linked_shop_id UUID, linked_domain TEXT, linked_brand_id UUID)
 LANGUAGE plpgsql
 SECURITY DEFINER SET search_path = public
 AS $fn$
@@ -205,16 +212,19 @@ BEGIN
 
   _sale := ROUND(p_sale_amount, 2);
 
-  SELECT id, creator_id, campaign_id, product_id INTO _link
-  FROM public.affiliate_links WHERE id = p_link_id;
+  SELECT l.id, l.creator_id, l.campaign_id, l.product_id INTO _link
+  FROM public.affiliate_links l WHERE l.id = p_link_id;
 
   IF NOT FOUND THEN
     RETURN QUERY SELECT false, 'Unknown ref', NULL::UUID, 0::NUMERIC, NULL::TEXT;
     RETURN;
   END IF;
 
-  SELECT id, brand_id, status, commission_rate, return_window_days INTO _campaign
-  FROM public.campaigns WHERE id = _link.campaign_id;
+  -- `status` is an OUT column of this function, so an unqualified
+  -- reference here is ambiguous against campaigns.status. This is the
+  -- first of three such sites and the one that fired first.
+  SELECT ca.id, ca.brand_id, ca.status, ca.commission_rate, ca.return_window_days INTO _campaign
+  FROM public.campaigns ca WHERE ca.id = _link.campaign_id;
 
   IF NOT FOUND THEN
     RETURN QUERY SELECT false, 'Campaign not found', NULL::UUID, 0::NUMERIC, NULL::TEXT;
@@ -239,18 +249,26 @@ BEGIN
   _net    := ROUND(_gross - _fee, 2);
   _window := COALESCE(_campaign.return_window_days, 14);
 
+  -- Every table below is aliased and every column qualified, and that is
+  -- load-bearing rather than tidiness. RETURNS TABLE puts `status` and
+  -- `net_commission` in scope as OUT variables, so an unqualified
+  -- reference to either is ambiguous against the column of the same name
+  -- and Postgres refuses to run the function at all — "column reference
+  -- 'status' is ambiguous", on every single call. Caught by
+  -- test_money_paths.sql before a real order ever reached it.
+
   -- Serialise every conversion on this campaign behind its escrow row.
-  SELECT id, balance, status INTO _escrow
-  FROM public.campaign_escrow
-  WHERE campaign_id = _link.campaign_id
+  SELECT e.id, e.balance, e.status INTO _escrow
+  FROM public.campaign_escrow e
+  WHERE e.campaign_id = _link.campaign_id
   FOR UPDATE;
 
   _balance := COALESCE(_escrow.balance, 0);
 
-  SELECT COALESCE(SUM(net_commission), 0) INTO _owed
-  FROM public.commissions
-  WHERE campaign_id = _link.campaign_id
-    AND status IN ('pending', 'confirmed');
+  SELECT COALESCE(SUM(c.net_commission), 0) INTO _owed
+  FROM public.commissions c
+  WHERE c.campaign_id = _link.campaign_id
+    AND c.status IN ('pending', 'confirmed');
 
   -- Existing liabilities count, not just this sale: ten orders each
   -- individually under the balance must not all pass against it.
@@ -262,10 +280,10 @@ BEGIN
   -- work. release_held_commissions() pays them the moment it is funded.
   _status := CASE WHEN _covered THEN 'pending' ELSE 'held' END;
 
-  SELECT id INTO _click
-  FROM public.clicks
-  WHERE affiliate_link_id = _link.id
-  ORDER BY clicked_at DESC
+  SELECT ck.id INTO _click
+  FROM public.clicks ck
+  WHERE ck.affiliate_link_id = _link.id
+  ORDER BY ck.clicked_at DESC
   LIMIT 1;
 
   BEGIN
