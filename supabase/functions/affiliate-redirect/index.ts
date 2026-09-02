@@ -15,6 +15,18 @@ serve(async (req) => {
     return new Response('Not found', { status: 404 })
   }
 
+  // Every link was reporting roughly double its real traffic, because this
+  // function had no method guard and logged a click for anything that
+  // reached it. A creator's link is shared into WhatsApp, Slack or iMessage
+  // long before a human taps it, and every one of those fetches a preview:
+  // a HEAD, then later the real GET, is two rows for one visitor. Chrome
+  // does the same thing by prefetching a URL it predicts you will open.
+  //
+  // These requests still get a correct redirect — a preview that 405s looks
+  // broken to the person about to share the link. They simply are not
+  // counted as visits.
+  const isRealVisit = req.method === 'GET' && !isPrefetchOrBot(req)
+
   // The destination lives on the product, not the link — so a brand changing
   // a product URL updates every creator's link at once.
   const { data: link, error } = await supabase
@@ -69,18 +81,25 @@ serve(async (req) => {
   // Awaited deliberately. Edge runtimes tear down the isolate as soon as the
   // response is returned, so a fire-and-forget insert loses clicks silently
   // and intermittently — the attribution data has to be worth trusting.
-  const { error: clickError } = await supabase.from('clicks').insert({
-    affiliate_link_id: link.id,
-    creator_id:        link.creator_id,
-    campaign_id:       link.campaign_id,
-    product_id:        link.product_id,
-    ip_hash:           await hashIP(req.headers.get('x-forwarded-for') ?? ''),
-    user_agent:        req.headers.get('user-agent') ?? '',
-    referrer:          req.headers.get('referer')    ?? '',
-  })
+  //
+  // record_click() does the duplicate check and the insert in one statement.
+  // Doing it as a SELECT then an INSERT from here would not help: a prefetch
+  // and the real navigation arrive milliseconds apart, so both would find
+  // nothing and both would insert.
+  if (isRealVisit) {
+    const { error: clickError } = await supabase.rpc('record_click', {
+      p_link_id:     link.id,
+      p_creator_id:  link.creator_id,
+      p_campaign_id: link.campaign_id,
+      p_product_id:  link.product_id,
+      p_ip_hash:     await hashIP(req.headers.get('x-forwarded-for') ?? ''),
+      p_user_agent:  req.headers.get('user-agent') ?? '',
+      p_referrer:    req.headers.get('referer')    ?? '',
+    })
 
-  // A logging failure must never cost the brand a sale — redirect regardless.
-  if (clickError) console.error('click insert failed:', clickError.message)
+    // A logging failure must never cost the brand a sale — redirect regardless.
+    if (clickError) console.error('record_click failed:', clickError.message)
+  }
 
   // Attribution rides in the URL, not a cookie. The cookie set here belongs to
   // this function's domain, and the brand's Shopify store runs on its own
@@ -97,7 +116,31 @@ serve(async (req) => {
   })
 })
 
-async function hashIP(ip: string): Promise<string> {
-  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(ip))
+// A request that is not a person arriving at the link.
+//
+// The Sec-Purpose / Purpose / X-Purpose headers are how browsers announce a
+// speculative fetch — Chrome sends "prefetch" for a URL it predicts you will
+// open, then requests it again for real when you do. The bot pattern catches
+// the crawlers that fetch a link the moment it is posted anywhere.
+function isPrefetchOrBot(req: Request): boolean {
+  const h = (name: string) => (req.headers.get(name) ?? '').toLowerCase()
+
+  const purpose = `${h('sec-purpose')} ${h('purpose')} ${h('x-purpose')} ${h('x-moz')}`
+  if (/prefetch|preview|prerender|prefetch;prerender/.test(purpose)) return true
+
+  const ua = h('user-agent')
+  if (!ua) return true   // no user agent at all is not a browser
+
+  return /bot|crawler|spider|slurp|facebookexternalhit|whatsapp|telegram|slackbot|discordbot|twitterbot|linkedinbot|embedly|quora link preview|pinterest|redditbot|applebot|bingpreview|skypeuripreview|vkshare|preview|scrapy|curl|wget|python-requests|headless/.test(ua)
+}
+
+// x-forwarded-for is a proxy chain — "client, proxy1, proxy2" — and the tail
+// can differ between two requests from the same visitor. Hashing the whole
+// header would therefore produce different keys for the prefetch and the real
+// navigation, and the deduplication would never match. Only the leftmost
+// entry, the original client, is stable.
+async function hashIP(forwardedFor: string): Promise<string> {
+  const client = forwardedFor.split(',')[0].trim()
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(client))
   return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('')
 }

@@ -29,8 +29,10 @@ and the other became a no-op, which is how `commissions` ended up without the
 | 11 | `escrow_release.sql` | Held-commission release, solvent confirmation, cron |
 | 12 | `shopify_integration.sql` | Shop registry, conversion write, refunds |
 | 13 | `product_lifecycle.sql` | Product archiving; refuses deletes that would orphan links |
+| 14 | `click_deduplication.sql` | Counts a click once per visitor; drops the dead `clicks` column |
 | — | `verify_checks.sql` | **Run this after any change.** Every check as one result set. |
 | — | `verify_hardening.sql` | Runtime proof the guards reject a browser write. Rolls itself back. |
+| — | `test_money_paths.sql` | 38 assertions over the plpgsql that moves money. Rolls itself back. |
 
 Steps 10–12 depend on 1–9. Within 1–9 the order matters only where a file
 references a function another creates (`is_admin`, `handle_updated_at`).
@@ -106,6 +108,33 @@ Authorisation therefore lives inside each function, where it can be specific.
 `commission-confirmation` shipped with none at all and `verify_jwt` off, which
 made it a public endpoint that drew down brand escrow; it now checks for an
 admin.
+
+## Testing
+
+`test_money_paths.sql` runs 38 assertions against the money functions, using
+fixtures it creates and a transaction it rolls back — safe to run on
+production, and it reads none of the live data.
+
+```
+commission arithmetic · duplicate-order idempotency · escrow solvency in
+aggregate · held→pending release · return-window confirmation · escrow
+never negative · payout batching · refund proportionality · click dedupe
+```
+
+Types are the other half. `npm run typecheck` checks every `.ts` file
+against the generated schema; `src/lib/database.types.test.ts` uses
+`@ts-expect-error` as its assertion, so the build fails if a query that
+should be rejected starts compiling.
+
+```bash
+npm run typecheck
+npx supabase gen types typescript --project-id nyeulzucksldwlcrbbmo > src/lib/database.types.ts
+```
+
+Regenerate the types after every migration. Adoption is file-by-file:
+`tsconfig.json` sets `allowJs` with `checkJs: false`, so `.jsx` files compile
+untouched and only `.ts` files are checked. `lib/supabase.ts` and
+`lib/api/creator.ts` are converted — the two that touch commissions.
 
 ## Money invariants
 

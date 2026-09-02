@@ -1,4 +1,8 @@
 import { supabase } from '../supabase'
+import type { Database } from '../database.types'
+
+type Commission = Database['public']['Tables']['commissions']['Row']
+type Payout     = Database['public']['Tables']['payouts']['Row']
 
 // Minimum confirmed balance before a creator may request a withdrawal. Keeps
 // payout fees proportionate to the amount being moved.
@@ -16,11 +20,50 @@ export const MIN_PAYOUT = 250
 // the Paystack transfer integration lands.
 export const PAYOUTS_ENABLED = false
 
-const one = v => (Array.isArray(v) ? v[0] : v)
+// PostgREST returns an embedded 1-to-1 as either an object or a single-element
+// array depending on how it resolved the relationship, so every read of one
+// goes through this.
+const one = <T,>(v: T | T[] | null | undefined): T | null =>
+  (Array.isArray(v) ? v[0] ?? null : v ?? null)
+
+// The subset of a commission this module reads. Derived from the generated Row
+// type rather than restated, so dropping or renaming a column downstream is a
+// compile error here instead of a silent undefined in the earnings totals.
+type CommissionRow = Pick<
+  Commission,
+  'id' | 'net_commission' | 'gross_commission' | 'sale_amount' | 'commission_rate'
+  | 'status' | 'created_at' | 'confirms_at' | 'campaign_id'
+> & { campaigns: { title: string } | { title: string }[] | null }
+
+export interface CampaignEarnings {
+  id: string
+  label: string
+  amount: number
+  pct: number
+}
+
+export interface CreatorStats {
+  commissions: CommissionRow[]
+  payouts: Pick<Payout, 'id' | 'amount' | 'status' | 'created_at' | 'processed_at'>[]
+  totalEarned: number
+  pending: number
+  confirmed: number
+  paid: number
+  held: number
+  available: number
+  pendingPayoutTotal: number
+  clicks: number
+  conversions: number
+  convRate: number
+  activeCampaigns: number
+  avgRate: number
+  byCampaign: CampaignEarnings[]
+  confirmedIds: string[]
+}
 
 // Everything the creator dashboard needs, in one round trip per table.
 // Commissions are the source of truth for money; clicks for traffic.
-export async function fetchCreatorStats(creatorId) {
+export async function fetchCreatorStats(creatorId: string | null | undefined): Promise<CreatorStats | null> {
   if (!creatorId) return null
 
   const [{ data: commissions }, { count: clickCount }, { data: applications }, { data: payouts }] =
@@ -46,12 +89,13 @@ export async function fetchCreatorStats(creatorId) {
         .order('created_at', { ascending: false }),
     ])
 
-  const rows = commissions ?? []
+  const rows = (commissions ?? []) as unknown as CommissionRow[]
 
   // 'denied' never counts toward anything a creator can see as earned.
   const live = rows.filter(c => c.status !== 'denied')
 
-  const sum = (list) => list.reduce((t, c) => t + Number(c.net_commission || 0), 0)
+  const sum = (list: CommissionRow[]) =>
+    list.reduce((t, c) => t + Number(c.net_commission || 0), 0)
 
   const pending   = live.filter(c => c.status === 'pending')
   const confirmed = live.filter(c => c.status === 'confirmed')
@@ -70,14 +114,14 @@ export async function fetchCreatorStats(creatorId) {
   const available = Math.max(0, sum(confirmed) - pendingPayoutTotal)
 
   // Earnings grouped by campaign, biggest first.
-  const byCampaign = Object.values(
-    live.reduce((acc, c) => {
-      const key = c.campaign_id ?? 'unknown'
-      acc[key] ??= { id: key, label: one(c.campaigns)?.title ?? 'Campaign', amount: 0 }
-      acc[key].amount += Number(c.net_commission || 0)
-      return acc
-    }, {}),
-  ).sort((a, b) => b.amount - a.amount)
+  const grouped = live.reduce<Record<string, CampaignEarnings>>((acc, c) => {
+    const key = c.campaign_id ?? 'unknown'
+    acc[key] ??= { id: key, label: one(c.campaigns)?.title ?? 'Campaign', amount: 0, pct: 0 }
+    acc[key]!.amount += Number(c.net_commission || 0)
+    return acc
+  }, {})
+
+  const byCampaign = Object.values(grouped).sort((a, b) => b.amount - a.amount)
 
   const topAmount = byCampaign[0]?.amount ?? 0
   for (const b of byCampaign) b.pct = topAmount ? Math.round((b.amount / topAmount) * 100) : 0
@@ -114,11 +158,12 @@ export async function requestPayout() {
   return { data: Array.isArray(data) ? data[0] : data, error }
 }
 
-export function formatZAR(n) {
+export function formatZAR(n: number | string | null | undefined): string {
   return `R${Number(n || 0).toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 }
 
-export function timeAgo(iso) {
+export function timeAgo(iso: string | null | undefined): string {
+  if (!iso) return ''
   const diff = Date.now() - new Date(iso).getTime()
   const mins = Math.floor(diff / 60000)
   if (mins < 1)    return 'just now'
