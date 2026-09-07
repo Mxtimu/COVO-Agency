@@ -56,7 +56,11 @@ function BrandOnboardRoute({ children }) {
 export default function App() {
   return (
     <AppProvider>
-      <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+      {/* The v7_startTransition and v7_relativeSplatPath future flags were
+          opting in early to behaviour that is simply how react-router 7
+          works, so they are gone with the upgrade rather than left as
+          no-ops that read like they still toggle something. */}
+      <BrowserRouter>
         {/* The route guards already render null while auth resolves, so a
             lazy chunk arriving a moment later shows the same blank frame
             rather than a spinner that flashes on every fast navigation. */}
