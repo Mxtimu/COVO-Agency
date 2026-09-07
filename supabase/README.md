@@ -31,6 +31,7 @@ and the other became a no-op, which is how `commissions` ended up without the
 | 13 | `product_lifecycle.sql` | Product archiving; refuses deletes that would orphan links |
 | 14 | `click_deduplication.sql` | Counts a click once per visitor; drops the dead `clicks` column |
 | 15 | `paystack_atomic.sql` | Deposit and payout settlement as one transaction each |
+| 16 | `paystack_test_mode.sql` | Tracks test-mode money; adds the pre-go-live purge |
 | — | `verify_checks.sql` | **Run this after any change.** Every check as one result set. |
 | — | `verify_hardening.sql` | Runtime proof the guards reject a browser write. Rolls itself back. |
 | — | `test_money_paths.sql` | 44 assertions over the plpgsql that moves money. Rolls itself back. |
@@ -137,6 +138,56 @@ Regenerate the types after every migration. Adoption is file-by-file:
 `tsconfig.json` sets `allowJs` with `checkJs: false`, so `.jsx` files compile
 untouched and only `.ts` files are checked. `lib/supabase.ts` and
 `lib/api/creator.ts` are converted — the two that touch commissions.
+
+## Paystack: test mode, and going live
+
+Paystack test mode is not a sandbox in the way that matters here. It sends
+**genuine webhooks with genuine signatures** to the same endpoint — the only
+difference is that no money moved. A test payment is therefore
+indistinguishable from a real one by signature alone, and would credit a real
+campaign's escrow with money nobody paid. That balance decides whether a
+creator's commission is payable or held, so fake funding means promising
+creators earnings against nothing.
+
+Two things prevent it:
+
+- Every event carries `data.domain` (`test` / `live`), and every key carries
+  its own mode in its prefix (`sk_test_` / `sk_live_`). The webhook derives
+  the expected mode from the key and **refuses any event that disagrees** —
+  400, not 500, because retrying will not fix a key pointing at the wrong
+  environment.
+- Tranches and payouts record `livemode`, so test money stays identifiable
+  rather than blending into the books.
+
+### Set the key
+
+```bash
+npx supabase secrets set PAYSTACK_SECRET_KEY=sk_test_xxx --project-ref nyeulzucksldwlcrbbmo
+```
+
+Nothing else changes between modes. Deriving the mode from the key's prefix
+means there is no second setting to remember at go-live, and no way for the
+two to disagree.
+
+### Going live
+
+```sql
+SELECT * FROM public.paystack_test_money();   -- what fake money is in the books
+SELECT * FROM public.purge_test_paystack_data();
+```
+
+1. `paystack_test_money()` — review what test deposits exist and against which
+   campaigns.
+2. `purge_test_paystack_data()` — deletes test tranches and payouts, then
+   **recomputes** every escrow balance from the surviving live deposits minus
+   what has actually been paid out. Recomputed rather than decremented, so the
+   result does not depend on the earlier arithmetic having been right.
+3. Swap the secret to `sk_live_…`. The webhook flips mode on its own.
+4. Point Paystack's live webhook URL at the same function.
+
+Run the purge **before** the key swap. Afterwards the endpoint rejects test
+events, so any test webhook still in flight would be refused rather than
+cleaned up.
 
 ## Money invariants
 

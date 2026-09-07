@@ -8,6 +8,12 @@ const supabase = createClient(
 )
 const PAYSTACK_SECRET = Deno.env.get('PAYSTACK_SECRET_KEY') ?? ''
 
+// Paystack keys carry their own mode: sk_test_… or sk_live_…. Deriving the
+// expected mode from the key rather than from a separate setting means there
+// is no second thing to remember to change at go-live, and no way for the two
+// to disagree.
+const EXPECTED_LIVEMODE = PAYSTACK_SECRET.startsWith('sk_live_')
+
 // Every money operation here used to be a separate unchecked round trip,
 // followed by an unconditional 200. That combination is the worst possible
 // one: a step could fail, nothing recorded it, and the 200 told Paystack the
@@ -51,6 +57,31 @@ serve(async (req) => {
 
   const ref = typeof event.data?.reference === 'string' ? event.data.reference : ''
 
+  // Paystack stamps every event with the mode that produced it. Test mode is
+  // not a sandbox in the way that matters: it sends real webhooks with real
+  // signatures, so a test payment is indistinguishable from a live one by
+  // signature alone. Without this check, a test payment against a live-keyed
+  // endpoint would credit a real campaign's escrow with money nobody paid —
+  // and that balance is what decides whether a creator's commission is
+  // payable, so COVO would be promising earnings against nothing.
+  //
+  // A mismatch means something is genuinely misconfigured, so it is refused
+  // rather than processed-and-flagged. 400, not 500: retrying will not fix a
+  // key pointing at the wrong environment, and a 500 would have Paystack
+  // redeliver it for days.
+  const eventLivemode = event.data?.domain === 'live'
+  if (eventLivemode !== EXPECTED_LIVEMODE) {
+    console.error(
+      `mode mismatch on ${event.event} ${ref}: event is ` +
+      `${eventLivemode ? 'live' : 'test'} but the configured key is ` +
+      `${EXPECTED_LIVEMODE ? 'live' : 'test'}. Refusing to touch money.`,
+    )
+    return new Response(
+      `Event is ${eventLivemode ? 'live' : 'test'} mode; this endpoint is configured for ${EXPECTED_LIVEMODE ? 'live' : 'test'}`,
+      { status: 400 },
+    )
+  }
+
   try {
     switch (event.event) {
       // ── Brand escrow deposit ──────────────────────────────────────
@@ -66,6 +97,7 @@ serve(async (req) => {
         const { data, error } = await supabase.rpc('apply_paystack_deposit', {
           p_reference: ref,
           p_amount:    amount,
+          p_livemode:  eventLivemode,
         })
 
         // The deposit is the one place a silent failure costs a brand real
@@ -82,7 +114,8 @@ serve(async (req) => {
         }
 
         console.log(
-          `deposit ${ref}: R${amount} credited, balance now R${result.escrow_after}, ` +
+          `[${eventLivemode ? 'LIVE' : 'TEST'}] deposit ${ref}: R${amount} credited, ` +
+          `balance now R${result.escrow_after}, ` +
           `${result.released} held commission(s) released` +
           (result.campaign_resumed ? ', campaign resumed' : ''),
         )
