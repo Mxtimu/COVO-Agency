@@ -6,7 +6,7 @@ const supabase = createClient(
   Deno.env.get('SUPABASE_URL')!,
   Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
 )
-const PAYSTACK_SECRET = Deno.env.get('PAYSTACK_SECRET_KEY')!
+const PAYSTACK_SECRET = Deno.env.get('PAYSTACK_SECRET_KEY') ?? ''
 
 // Every money operation here used to be a separate unchecked round trip,
 // followed by an unconditional 200. That combination is the worst possible
@@ -19,6 +19,19 @@ const PAYSTACK_SECRET = Deno.env.get('PAYSTACK_SECRET_KEY')!
 // honestly. A 500 is not an error to be avoided here; it is how Paystack is
 // told to deliver the event again.
 serve(async (req) => {
+  // Without the secret there is no way to tell a real Paystack delivery from
+  // anything else, so nothing here may run. This used to be a bare `!`
+  // assertion, which meant createHmac threw on an undefined key and every
+  // request — signed or not — died as an unhandled 500 before the signature
+  // was ever compared. A 500 is also the one answer that makes Paystack keep
+  // retrying, so a missing secret would have produced endless redeliveries of
+  // events that could never be processed.
+  if (!PAYSTACK_SECRET) {
+    console.error('PAYSTACK_SECRET_KEY is not set — refusing to process webhooks. ' +
+                  'Set it with: npx supabase secrets set PAYSTACK_SECRET_KEY=sk_...')
+    return new Response('Webhook not configured', { status: 503 })
+  }
+
   // ── 1. Verify Paystack HMAC signature ─────────────────────────────
   const body      = await req.text()
   const signature = req.headers.get('x-paystack-signature') ?? ''

@@ -33,7 +33,7 @@ and the other became a no-op, which is how `commissions` ended up without the
 | 15 | `paystack_atomic.sql` | Deposit and payout settlement as one transaction each |
 | — | `verify_checks.sql` | **Run this after any change.** Every check as one result set. |
 | — | `verify_hardening.sql` | Runtime proof the guards reject a browser write. Rolls itself back. |
-| — | `test_money_paths.sql` | 32 assertions over the plpgsql that moves money. Rolls itself back. |
+| — | `test_money_paths.sql` | 44 assertions over the plpgsql that moves money. Rolls itself back. |
 
 Steps 10–12 depend on 1–9. Within 1–9 the order matters only where a file
 references a function another creates (`is_admin`, `handle_updated_at`).
@@ -112,14 +112,15 @@ admin.
 
 ## Testing
 
-`test_money_paths.sql` runs 32 assertions against the money functions, using
+`test_money_paths.sql` runs 44 assertions against the money functions, using
 fixtures it creates and a transaction it rolls back — safe to run on
 production, and it reads none of the live data.
 
 ```
 commission arithmetic · duplicate-order idempotency · escrow solvency in
 aggregate · held→pending release · return-window confirmation · escrow
-never negative · payout batching · refund proportionality · click dedupe
+never negative · payout batching · refund proportionality · click dedupe ·
+Paystack deposit atomicity · payout settlement and reversal
 ```
 
 Types are the other half. `npm run typecheck` checks every `.ts` file

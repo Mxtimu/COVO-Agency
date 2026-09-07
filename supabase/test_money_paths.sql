@@ -16,6 +16,8 @@
 --   7. payout batching — a commission cannot be claimed by two payouts
 --   8. refunds — proportional reduction, and denial at full refund
 --   9. click deduplication
+--  10. Paystack deposit — atomic, idempotent, releases and resumes
+--  11. payout settlement — commissions paid together, reversal restores
 --
 -- Output is one NOTICE per assertion plus a summary. In the Supabase SQL
 -- Editor, NOTICE output appears under the results pane; if you cannot see
@@ -56,7 +58,7 @@ DECLARE
   _r        RECORD;
   _n        INT;
   _v        NUMERIC;
-  _c1       UUID;
+  _ids      UUID[];
 BEGIN
   -- ── Fixtures ───────────────────────────────────────────────────────
   -- auth.users rows are required by the profiles FK.
@@ -261,6 +263,72 @@ BEGIN
 
   SELECT COUNT(*) INTO _n FROM public.clicks WHERE affiliate_link_id = _link;
   PERFORM pg_temp.check_eq('10d two clicks recorded, not three', _n, 2);
+
+  -- ══ 11. Paystack deposit, atomically ═════════════════════════════
+  -- State here: escrow balance 0, ORDER-2 confirmed (92), ORDER-3 held (92).
+  -- Pause it so the resume path is exercised too.
+  UPDATE public.campaign_escrow SET status = 'paused' WHERE id = _escrow;
+  UPDATE public.campaigns       SET status = 'paused' WHERE id = _campaign;
+
+  INSERT INTO public.escrow_tranches (escrow_id, campaign_id, brand_id, amount,
+                                      paystack_reference, paystack_status)
+  VALUES (_escrow, _campaign, _brand, 1000, 'PSTK-DEP-1', 'pending');
+
+  SELECT * INTO _r FROM public.apply_paystack_deposit('PSTK-DEP-1', 1000);
+  PERFORM pg_temp.check('11a deposit applied', _r.deposit_applied, COALESCE(_r.outcome,''));
+  PERFORM pg_temp.check_eq('11b escrow credited to 1000', _r.escrow_after, 1000);
+  PERFORM pg_temp.check_eq('11c held commission released', _r.released, 1);
+  PERFORM pg_temp.check('11d paused campaign resumed', _r.campaign_resumed, '');
+
+  SELECT status INTO _r FROM public.campaigns WHERE id = _campaign;
+  PERFORM pg_temp.check('11e campaign is active again', _r.status = 'active', _r.status);
+
+  -- Paystack redelivers even after success. The second must change nothing —
+  -- this is the double-credit the old webhook was vulnerable to.
+  SELECT * INTO _r FROM public.apply_paystack_deposit('PSTK-DEP-1', 1000);
+  PERFORM pg_temp.check('11f redelivery is a no-op', NOT _r.deposit_applied, COALESCE(_r.outcome,''));
+
+  SELECT balance INTO _v FROM public.campaign_escrow WHERE id = _escrow;
+  PERFORM pg_temp.check_eq('11g balance still 1000, not 2000', _v, 1000);
+
+  SELECT * INTO _r FROM public.apply_paystack_deposit('PSTK-NOPE', 500);
+  PERFORM pg_temp.check('11h unknown reference is a clean no-op', NOT _r.deposit_applied, COALESCE(_r.outcome,''));
+
+
+  -- ══ 12. Payout settlement, atomically ════════════════════════════
+  -- Confirm everything outstanding so there is something to pay.
+  UPDATE public.commissions SET status = 'confirmed'
+   WHERE campaign_id = _campaign AND status = 'pending';
+
+  SELECT ARRAY_AGG(c.id) INTO _ids FROM public.commissions c
+   WHERE c.creator_id = _creator AND c.status = 'confirmed';
+
+  INSERT INTO public.payouts (creator_id, amount, status, commission_ids, paystack_reference)
+  VALUES (_creator, 184, 'processing', _ids, 'PSTK-TRF-1');
+
+  SELECT * INTO _r FROM public.mark_payout_settled('PSTK-TRF-1', 'success');
+  PERFORM pg_temp.check('12a payout marked success', _r.payout_updated, COALESCE(_r.outcome,''));
+  PERFORM pg_temp.check_eq('12b its commissions became paid', _r.commissions_changed,
+                           COALESCE(ARRAY_LENGTH(_ids, 1), 0));
+
+  -- The bug this replaces: payout success recorded, commissions left
+  -- confirmed, so the creator could claim the same earnings again.
+  SELECT COUNT(*) INTO _n FROM public.commissions
+   WHERE id = ANY(_ids) AND status = 'confirmed';
+  PERFORM pg_temp.check_eq('12c none left claimable', _n, 0);
+
+  SELECT * INTO _r FROM public.mark_payout_settled('PSTK-TRF-1', 'success');
+  PERFORM pg_temp.check('12d redelivery is a no-op', NOT _r.payout_updated, COALESCE(_r.outcome,''));
+
+  -- A reversal means the creator never received it, so the earnings must
+  -- become claimable again.
+  SELECT * INTO _r FROM public.mark_payout_settled('PSTK-TRF-1', 'reversed');
+  PERFORM pg_temp.check('12e reversal applied', _r.payout_updated, COALESCE(_r.outcome,''));
+
+  SELECT COUNT(*) INTO _n FROM public.commissions
+   WHERE id = ANY(_ids) AND status = 'confirmed';
+  PERFORM pg_temp.check_eq('12f reversal makes them claimable again', _n,
+                           COALESCE(ARRAY_LENGTH(_ids, 1), 0));
 
 EXCEPTION WHEN OTHERS THEN
   INSERT INTO _results VALUES ('FIXTURE OR TEST CRASHED', false, SQLERRM);
