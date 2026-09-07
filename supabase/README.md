@@ -30,9 +30,10 @@ and the other became a no-op, which is how `commissions` ended up without the
 | 12 | `shopify_integration.sql` | Shop registry, conversion write, refunds |
 | 13 | `product_lifecycle.sql` | Product archiving; refuses deletes that would orphan links |
 | 14 | `click_deduplication.sql` | Counts a click once per visitor; drops the dead `clicks` column |
+| 15 | `paystack_atomic.sql` | Deposit and payout settlement as one transaction each |
 | — | `verify_checks.sql` | **Run this after any change.** Every check as one result set. |
 | — | `verify_hardening.sql` | Runtime proof the guards reject a browser write. Rolls itself back. |
-| — | `test_money_paths.sql` | 38 assertions over the plpgsql that moves money. Rolls itself back. |
+| — | `test_money_paths.sql` | 32 assertions over the plpgsql that moves money. Rolls itself back. |
 
 Steps 10–12 depend on 1–9. Within 1–9 the order matters only where a file
 references a function another creates (`is_admin`, `handle_updated_at`).
@@ -111,7 +112,7 @@ admin.
 
 ## Testing
 
-`test_money_paths.sql` runs 38 assertions against the money functions, using
+`test_money_paths.sql` runs 32 assertions against the money functions, using
 fixtures it creates and a transaction it rolls back — safe to run on
 production, and it reads none of the live data.
 
@@ -151,3 +152,12 @@ Worth keeping in mind when changing anything above:
   may only ask.
 - **Escrow cannot go negative.** `confirm_due_commissions()` confirms only the
   prefix each balance covers and returns the rest to `held`.
+- **A money step is never half-done.** `apply_paystack_deposit()` claims the
+  tranche, credits the escrow, releases held commissions and resumes the
+  campaign in one transaction; `mark_payout_settled()` sets the payout status
+  and its commissions together. If any part raises, all of it rolls back and
+  the webhook returns non-200 so Paystack redelivers.
+- **A failed write is never reported as success.** No `await supabase.…`
+  in this codebase discards its error. The webhooks answer 500 so the sender
+  retries; the UI says what failed instead of optimistically showing the
+  change it did not make.

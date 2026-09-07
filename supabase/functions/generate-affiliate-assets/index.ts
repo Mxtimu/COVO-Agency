@@ -38,8 +38,17 @@ serve(async (req) => {
     if (userError || !user) return json({ error: 'Not authenticated' }, 401)
 
     // Role is read with the service-role client so RLS cannot hide it.
-    const { data: callerProfile } = await supabase
+    const { data: callerProfile, error: roleError } = await supabase
       .from('profiles').select('role').eq('id', user.id).single()
+
+    // A failed lookup is not the same as "not an admin". Both used to end
+    // here as a 403, which told a real admin they lacked permission when the
+    // truth was that the database could not be reached — sending them to
+    // check their account instead of the outage.
+    if (roleError) {
+      console.error('role lookup failed for', user.id, roleError.message)
+      return json({ error: 'Could not verify your permissions. Please try again.' }, 503)
+    }
 
     if (callerProfile?.role !== 'admin') {
       return json({ error: 'Only COVO admins can generate affiliate links.' }, 403)

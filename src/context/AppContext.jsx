@@ -20,14 +20,26 @@ export function AppProvider({ children }) {
     }
   }, [profile])
 
+  // Returns the error rather than swallowing it, so a caller can tell the
+  // user their change did not stick. The local state is still set first —
+  // the UI should feel responsive — but it is rolled back on failure rather
+  // than left showing something the database never accepted.
   async function saveJoined(val) {
+    const previous = joined
     setJoined(val)
-    if (session?.user?.id) {
-      await supabase.from('creator_profiles').upsert({
-        id: session.user.id,
-        joined_campaign_ids: val,
-      })
+
+    if (!session?.user?.id) return { error: null }
+
+    const { error } = await supabase.from('creator_profiles').upsert({
+      id: session.user.id,
+      joined_campaign_ids: val,
+    })
+
+    if (error) {
+      console.error('[joined campaigns] save failed:', error.message)
+      setJoined(previous)
     }
+    return { error }
   }
 
   const persist = (key, setter) => (val) => {

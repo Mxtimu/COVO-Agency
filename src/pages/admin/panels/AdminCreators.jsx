@@ -25,8 +25,12 @@ export default function AdminCreators() {
     return Array.isArray(raw) ? raw[0] : raw
   }
 
+  // The local state update used to happen regardless of whether the write
+  // landed, so an RLS refusal or a dropped connection showed the admin an
+  // approved creator who was still pending in the database.
   async function setStatus(id, status) {
-    await supabase.from('profiles').update({ status }).eq('id', id)
+    const { error } = await supabase.from('profiles').update({ status }).eq('id', id)
+    if (error) return alert(`Could not set status to ${status}: ${error.message}`)
     setCreators(prev => prev.map(c => c.id === id ? { ...c, status } : c))
   }
 

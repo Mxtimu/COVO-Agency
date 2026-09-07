@@ -23,8 +23,12 @@ export default function AdminBrands() {
     return Array.isArray(raw) ? raw[0] : raw
   }
 
+  // Only reflect the change locally once the database has accepted it —
+  // otherwise a failed write leaves the admin looking at an approved brand
+  // that is still pending, and it survives until the next reload.
   async function setStatus(id, status) {
-    await supabase.from('profiles').update({ status }).eq('id', id)
+    const { error } = await supabase.from('profiles').update({ status }).eq('id', id)
+    if (error) return alert(`Could not set status to ${status}: ${error.message}`)
     setBrands(prev => prev.map(b => b.id === id ? { ...b, status } : b))
   }
 

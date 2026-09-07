@@ -39,20 +39,36 @@ serve(async (req) => {
 
   // The domain header is untrusted at this point; it only selects which
   // secret to try. A forged domain simply fails the comparison below.
-  const { data: shop } = await supabase
+  const { data: shop, error: shopError } = await supabase
     .from('shopify_shops')
     .select('brand_id, shop_domain, active')
     .eq('shop_domain', domain)
     .maybeSingle()
+
+  // An unreachable registry is not an unregistered shop. Left unchecked this
+  // fell through to the fallback secret, failed the HMAC and answered 401 —
+  // which tells Paystack-style retriers to give up on a real order because
+  // the database blinked. 503 keeps the retry alive.
+  if (shopError) {
+    console.error('shop lookup failed for', domain, shopError.message)
+    return json({ error: 'Shop registry unavailable' }, 503)
+  }
 
   if (shop && shop.active === false) {
     // Acknowledged, not acted on: a 4xx would make Shopify retry for days.
     return json({ ignored: 'Store is not active on COVO' })
   }
 
-  const secret = shop
-    ? await shopSecret(domain)
-    : FALLBACK_SECRET
+  // shopSecret throws on a failed lookup rather than quietly returning the
+  // fallback. Caught here so it becomes a 503 Shopify will retry, not an
+  // unhandled rejection.
+  let secret: string
+  try {
+    secret = shop ? await shopSecret(domain) : FALLBACK_SECRET
+  } catch (e) {
+    console.error(e instanceof Error ? e.message : e)
+    return json({ error: 'Shop registry unavailable' }, 503)
+  }
 
   if (!secret) {
     console.error('no webhook secret for shop:', domain)
@@ -202,11 +218,18 @@ function extractRef(order: any): string | null {
 async function shopSecret(domain: string): Promise<string> {
   // Fetched in its own query so the secret never travels with the row that
   // gets logged or returned anywhere.
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from('shopify_shops')
     .select('webhook_secret')
     .eq('shop_domain', domain)
     .maybeSingle()
+
+  // Falling back to the shared secret on a *failed* lookup would silently
+  // verify a shop's webhook against the wrong key — it would simply 401 and
+  // look like a signature problem. Fail loudly instead; the caller turns
+  // this into a 503 so the delivery is retried.
+  if (error) throw new Error(`secret lookup failed for ${domain}: ${error.message}`)
+
   return data?.webhook_secret ?? FALLBACK_SECRET
 }
 

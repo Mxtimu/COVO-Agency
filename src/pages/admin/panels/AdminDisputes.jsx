@@ -27,20 +27,29 @@ export default function AdminDisputes() {
     setLoading(false)
   }
 
+  // A dispute is a money decision — it feeds the reliability component of the
+  // creator's COVO Score and can end with a commission denied. Resolving one
+  // used to update the screen whether or not the write landed, so a failure
+  // left the dispute open in the database while the admin believed it closed
+  // and moved on. The resolution notes went with it.
   async function resolve(id, status) {
     const notes = resolving[id] || ''
-    await supabase.from('disputes').update({
+    const { error } = await supabase.from('disputes').update({
       status,
       resolved_by:      session?.user?.id,
       resolution_notes: notes,
       updated_at:       new Date().toISOString(),
     }).eq('id', id)
+
+    if (error) return alert(`Could not ${status === 'resolved' ? 'resolve' : 'dismiss'} this dispute: ${error.message}\n\nYour notes have been kept — try again.`)
+
     setDisputes(prev => prev.map(d => d.id === id ? { ...d, status, resolution_notes: notes } : d))
     setResolving(r => { const n = { ...r }; delete n[id]; return n })
   }
 
   async function setUnderReview(id) {
-    await supabase.from('disputes').update({ status: 'under_review' }).eq('id', id)
+    const { error } = await supabase.from('disputes').update({ status: 'under_review' }).eq('id', id)
+    if (error) return alert(`Could not mark this dispute under review: ${error.message}`)
     setDisputes(prev => prev.map(d => d.id === id ? { ...d, status: 'under_review' } : d))
   }
 

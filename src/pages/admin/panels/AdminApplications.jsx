@@ -81,15 +81,31 @@ export default function AdminApplications() {
     if (updateError) { setBusy(null); return setError(updateError.message) }
 
     // Mirror into joined_campaign_ids, which the creator dashboard reads.
-    const { data: cp } = await supabase
+    // The approval and the links are already committed at this point, so a
+    // failure here is not fatal — but it is not nothing either: the creator
+    // would be approved with working links that their dashboard never shows
+    // them. Say so rather than letting it pass as a clean approval.
+    const { data: cp, error: readError } = await supabase
       .from('creator_profiles').select('joined_campaign_ids').eq('id', app.creator_id).single()
+
+    if (readError) {
+      setBusy(null)
+      load()
+      return setError(`Approved and links generated, but the creator's campaign list could not be read (${readError.message}). Their dashboard may not show this campaign until they reapply or an admin retries.`)
+    }
 
     const joined = new Set(cp?.joined_campaign_ids ?? [])
     joined.add(app.campaign_id)
-    await supabase.from('creator_profiles')
+    const { error: mirrorError } = await supabase.from('creator_profiles')
       .upsert({ id: app.creator_id, joined_campaign_ids: [...joined] })
 
     setBusy(null)
+
+    if (mirrorError) {
+      load()
+      return setError(`Approved and links generated, but the creator's campaign list was not updated (${mirrorError.message}). Their dashboard may not show this campaign yet.`)
+    }
+
     load()
   }
 

@@ -8,6 +8,16 @@ const supabase = createClient(
 )
 const PAYSTACK_SECRET = Deno.env.get('PAYSTACK_SECRET_KEY')!
 
+// Every money operation here used to be a separate unchecked round trip,
+// followed by an unconditional 200. That combination is the worst possible
+// one: a step could fail, nothing recorded it, and the 200 told Paystack the
+// event was handled so it never retried.
+//
+// The sequences now live in single database functions — apply_paystack_deposit
+// and mark_payout_settled — so each is one transaction that either completes
+// or rolls back entirely. This file's remaining job is to report failure
+// honestly. A 500 is not an error to be avoided here; it is how Paystack is
+// told to deliver the event again.
 serve(async (req) => {
   // ── 1. Verify Paystack HMAC signature ─────────────────────────────
   const body      = await req.text()
@@ -17,85 +27,107 @@ serve(async (req) => {
     return new Response('Unauthorized', { status: 401 })
   }
 
-  const event = JSON.parse(body)
+  let event: { event?: string; data?: Record<string, unknown> }
+  try {
+    event = JSON.parse(body)
+  } catch {
+    // Unparseable will never parse — 400 so Paystack stops rather than
+    // retrying the same broken payload for days.
+    return new Response('Malformed body', { status: 400 })
+  }
 
-  // ── 2. Handle charge.success (brand escrow deposit) ──────────────
-  if (event.event === 'charge.success') {
-    const ref    = event.data.reference as string
-    const amount = event.data.amount / 100  // Paystack sends in kobo/cents
+  const ref = typeof event.data?.reference === 'string' ? event.data.reference : ''
 
-    // Paystack retries a webhook until it gets a 200, and will redeliver
-    // after a timeout even when the first attempt succeeded. Matching on
-    // the reference alone returned the tranche every time, so a retry
-    // credited the escrow twice. Claiming the row by moving it out of
-    // 'pending' makes the second delivery match nothing.
-    const { data: tranche } = await supabase
-      .from('escrow_tranches')
-      .update({ paystack_status: 'success', deposited_at: new Date().toISOString() })
-      .eq('paystack_reference', ref)
-      .eq('paystack_status', 'pending')
-      .select('escrow_id, amount')
-      .maybeSingle()
+  try {
+    switch (event.event) {
+      // ── Brand escrow deposit ──────────────────────────────────────
+      case 'charge.success': {
+        if (!ref) return bad('charge.success with no reference')
 
-    if (tranche) {
-      // Add to escrow balance
-      await supabase.rpc('increment_escrow_balance', {
-        p_escrow_id: tranche.escrow_id,
-        p_amount:    amount,
-      })
-
-      const { data: escrow } = await supabase
-        .from('campaign_escrow')
-        .select('balance, status, campaign_id')
-        .eq('id', tranche.escrow_id)
-        .single()
-
-      if (escrow) {
-        // Commissions earned while the campaign was underfunded were
-        // parked as 'held'. This deposit is what pays for them, so
-        // release what it covers — oldest creator first — before
-        // deciding whether the campaign can reopen.
-        const { error: releaseError } = await supabase.rpc('release_held_commissions', {
-          p_campaign_id: escrow.campaign_id,
-        })
-        if (releaseError) console.error('release_held_commissions failed:', releaseError.message)
-
-        // Check if campaign was paused due to low balance — resume it
-        if (escrow.status === 'paused' && escrow.balance >= 500) {
-          await supabase.from('campaign_escrow').update({ status: 'active' }).eq('id', tranche.escrow_id)
-          await supabase.from('campaigns').update({ status: 'active' }).eq('id', escrow.campaign_id)
+        const rawAmount = Number(event.data?.amount)
+        if (!Number.isFinite(rawAmount) || rawAmount <= 0) {
+          return bad(`charge.success ${ref} with unusable amount ${event.data?.amount}`)
         }
+        const amount = rawAmount / 100  // Paystack sends in kobo/cents
+
+        const { data, error } = await supabase.rpc('apply_paystack_deposit', {
+          p_reference: ref,
+          p_amount:    amount,
+        })
+
+        // The deposit is the one place a silent failure costs a brand real
+        // money, so this throws rather than logging and moving on.
+        if (error) throw new Error(`apply_paystack_deposit(${ref}): ${error.message}`)
+
+        const result = Array.isArray(data) ? data[0] : data
+
+        if (!result?.deposit_applied) {
+          // Already applied, or an unknown reference. Both are settled
+          // states, not failures — acknowledge so Paystack stops.
+          console.log(`deposit ${ref} not applied: ${result?.outcome ?? 'no result'}`)
+          return ok()
+        }
+
+        console.log(
+          `deposit ${ref}: R${amount} credited, balance now R${result.escrow_after}, ` +
+          `${result.released} held commission(s) released` +
+          (result.campaign_resumed ? ', campaign resumed' : ''),
+        )
+        return ok()
       }
+
+      // ── Creator payout settled ────────────────────────────────────
+      case 'transfer.success':
+      case 'transfer.failed':
+      case 'transfer.reversed': {
+        if (!ref) return bad(`${event.event} with no reference`)
+
+        const status = event.event === 'transfer.success'  ? 'success'
+                     : event.event === 'transfer.reversed' ? 'reversed'
+                     : 'failed'
+
+        const { data, error } = await supabase.rpc('mark_payout_settled', {
+          p_reference: ref,
+          p_status:    status,
+        })
+
+        if (error) throw new Error(`mark_payout_settled(${ref}, ${status}): ${error.message}`)
+
+        const result = Array.isArray(data) ? data[0] : data
+
+        if (!result?.payout_updated) {
+          console.log(`payout ${ref} unchanged: ${result?.outcome ?? 'no result'}`)
+          return ok()
+        }
+
+        console.log(`payout ${ref} -> ${status}, ${result.commissions_changed} commission(s) updated`)
+        return ok()
+      }
+
+      default:
+        // Paystack sends events COVO does not act on. Acknowledge them —
+        // a non-200 would have it retry something we will never handle.
+        return ok()
     }
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e)
+    console.error(`paystack ${event.event} ${ref} FAILED:`, message)
+    // 500 so Paystack redelivers. The database function rolled its whole
+    // transaction back, so the retry starts from a clean state.
+    return new Response(JSON.stringify({ error: message }), {
+      status: 500,
+      headers: { 'Content-Type': 'application/json' },
+    })
   }
-
-  // ── 3. Handle transfer.success (creator payout) ──────────────────
-  if (event.event === 'transfer.success') {
-    const ref = event.data.reference as string
-    await supabase.from('payouts')
-      .update({ status: 'success', processed_at: new Date().toISOString() })
-      .eq('paystack_reference', ref)
-
-    // Mark commissions as paid
-    const { data: payout } = await supabase
-      .from('payouts').select('commission_ids').eq('paystack_reference', ref).single()
-    if (payout?.commission_ids?.length) {
-      // Only confirmed commissions become paid. Without the status filter
-      // a redelivered transfer.success could drag a commission that had
-      // since been disputed and denied back into 'paid'.
-      await supabase.from('commissions')
-        .update({ status: 'paid' })
-        .in('id', payout.commission_ids)
-        .eq('status', 'confirmed')
-    }
-  }
-
-  // ── 4. Handle transfer.failed ─────────────────────────────────────
-  if (event.event === 'transfer.failed' || event.event === 'transfer.reversed') {
-    const ref    = event.data.reference as string
-    const status = event.event === 'transfer.reversed' ? 'reversed' : 'failed'
-    await supabase.from('payouts').update({ status }).eq('paystack_reference', ref)
-  }
-
-  return new Response('OK', { status: 200 })
 })
+
+function ok() {
+  return new Response('OK', { status: 200 })
+}
+
+// A 400 for something that will never succeed on retry, logged loudly so it
+// is visible in Paystack's delivery log rather than only here.
+function bad(reason: string) {
+  console.error('paystack rejected:', reason)
+  return new Response(reason, { status: 400 })
+}

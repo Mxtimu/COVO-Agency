@@ -49,6 +49,14 @@ function SuccessBanner({ text }) {
   )
 }
 
+function ErrorBanner({ text }) {
+  return (
+    <div style={{ background: 'rgba(239,68,68,.08)', border: '1px solid rgba(239,68,68,.25)', color: '#FCA5A5', padding: '.5rem .85rem', borderRadius: 8, fontSize: '.8rem', marginBottom: '.75rem', lineHeight: 1.5 }}>
+      Could not save: {text}
+    </div>
+  )
+}
+
 export default function DashProfile({ user, profile }) {
   const { session } = useApp()
 
@@ -69,6 +77,9 @@ export default function DashProfile({ user, profile }) {
   })
   const [savingDetails, setSavingDetails] = useState(false)
   const [savedDetails,  setSavedDetails]  = useState(false)
+  // Shared by both save paths below — a failed write has to be visible,
+  // not just absent.
+  const [saveError,     setSaveError]     = useState('')
 
   function openDetails() {
     setDetails({
@@ -80,14 +91,26 @@ export default function DashProfile({ user, profile }) {
     setEditingDetails(true)
   }
 
+  // "Profile updated successfully" used to appear whether or not the write
+  // succeeded, and the form closed either way — so a failed save looked
+  // exactly like a good one until the next reload put the old values back.
   async function saveDetails() {
     if (!session?.user?.id) return
     setSavingDetails(true)
-    await supabase.from('creator_profiles').upsert({
+    setSaveError('')
+    const { error } = await supabase.from('creator_profiles').upsert({
       id: session.user.id,
       ...details,
     })
     setSavingDetails(false)
+
+    if (error) {
+      // The form stays open with their text in it — closing it would lose
+      // what they typed on top of not having saved it.
+      setSaveError(error.message)
+      return
+    }
+
     setSavedDetails(true)
     setEditingDetails(false)
     setTimeout(() => setSavedDetails(false), 2500)
@@ -106,11 +129,18 @@ export default function DashProfile({ user, profile }) {
   async function saveNiches() {
     if (!session?.user?.id) return
     setSavingNiches(true)
-    await supabase.from('creator_profiles').upsert({
+    setSaveError('')
+    const { error } = await supabase.from('creator_profiles').upsert({
       id: session.user.id,
       niches: selected,
     })
     setSavingNiches(false)
+
+    if (error) {
+      setSaveError(error.message)
+      return
+    }
+
     setSavedNiches(true)
     setEditingNiches(false)
     setTimeout(() => setSavedNiches(false), 2500)
@@ -146,6 +176,7 @@ export default function DashProfile({ user, profile }) {
           </h3>
 
           {savedDetails && <SuccessBanner text="Profile updated successfully." />}
+          {saveError && <ErrorBanner text={saveError} />}
 
           {/* Avatar row — always visible */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', padding: '1rem', background: 'var(--dark3)', borderRadius: 10, marginBottom: '1rem' }}>
@@ -219,6 +250,7 @@ export default function DashProfile({ user, profile }) {
           </h3>
 
           {savedNiches && <SuccessBanner text="Niches updated successfully." />}
+          {saveError && <ErrorBanner text={saveError} />}
 
           {editingNiches ? (
             <>
