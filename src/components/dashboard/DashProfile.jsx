@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { supabase } from '../../lib/supabase'
 import { useApp } from '../../context/AppContext'
 import CovoScore from './CovoScore'
+import PayoutDetails from './PayoutDetails'
 import Icon from '../ui/Icon'
 
 const ALL_NICHES = [
@@ -157,6 +158,13 @@ export default function DashProfile({ user, profile }) {
           not see it anywhere. */}
       <div style={{ marginBottom: '1.25rem' }}>
         <CovoScore />
+      </div>
+
+      {/* Where the money actually goes. Sits above the profile fields
+          because a creator with cleared earnings and no bank account has
+          one thing to do here, and it is this. */}
+      <div style={{ marginBottom: '1.25rem' }}>
+        <PayoutDetails />
       </div>
 
       <div className="two-col">

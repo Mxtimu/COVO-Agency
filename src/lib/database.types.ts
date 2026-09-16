@@ -18,7 +18,6 @@ export type Database = {
         Row: {
           brand_slug: string | null
           campaign_id: string
-          clicks: number
           created_at: string | null
           creator_id: string
           creator_username: string | null
@@ -31,7 +30,6 @@ export type Database = {
         Insert: {
           brand_slug?: string | null
           campaign_id: string
-          clicks?: number
           created_at?: string | null
           creator_id: string
           creator_username?: string | null
@@ -44,7 +42,6 @@ export type Database = {
         Update: {
           brand_slug?: string | null
           campaign_id?: string
-          clicks?: number
           created_at?: string | null
           creator_id?: string
           creator_username?: string | null
@@ -459,8 +456,9 @@ export type Database = {
       }
       creator_profiles: {
         Row: {
+          bank_account_last4: string | null
           bank_account_name: string | null
-          bank_account_number: string | null
+          bank_code: string | null
           bank_name: string | null
           bio: string | null
           covo_score: number
@@ -479,13 +477,15 @@ export type Database = {
           niches: string[] | null
           paystack_recipient_code: string | null
           primary_handle: string | null
+          recipient_created_at: string | null
           tiktok_handle: string | null
           updated_at: string | null
           youtube_handle: string | null
         }
         Insert: {
+          bank_account_last4?: string | null
           bank_account_name?: string | null
-          bank_account_number?: string | null
+          bank_code?: string | null
           bank_name?: string | null
           bio?: string | null
           covo_score?: number
@@ -504,13 +504,15 @@ export type Database = {
           niches?: string[] | null
           paystack_recipient_code?: string | null
           primary_handle?: string | null
+          recipient_created_at?: string | null
           tiktok_handle?: string | null
           updated_at?: string | null
           youtube_handle?: string | null
         }
         Update: {
+          bank_account_last4?: string | null
           bank_account_name?: string | null
-          bank_account_number?: string | null
+          bank_code?: string | null
           bank_name?: string | null
           bio?: string | null
           covo_score?: number
@@ -529,6 +531,7 @@ export type Database = {
           niches?: string[] | null
           paystack_recipient_code?: string | null
           primary_handle?: string | null
+          recipient_created_at?: string | null
           tiktok_handle?: string | null
           updated_at?: string | null
           youtube_handle?: string | null
@@ -623,6 +626,7 @@ export type Database = {
           deposited_at: string | null
           escrow_id: string
           id: string
+          livemode: boolean
           paystack_reference: string | null
           paystack_status: string
         }
@@ -634,6 +638,7 @@ export type Database = {
           deposited_at?: string | null
           escrow_id: string
           id?: string
+          livemode?: boolean
           paystack_reference?: string | null
           paystack_status?: string
         }
@@ -645,6 +650,7 @@ export type Database = {
           deposited_at?: string | null
           escrow_id?: string
           id?: string
+          livemode?: boolean
           paystack_reference?: string | null
           paystack_status?: string
         }
@@ -680,6 +686,7 @@ export type Database = {
           creator_id: string
           id: string
           initiated_by: string | null
+          livemode: boolean
           paystack_reference: string | null
           paystack_transfer_code: string | null
           processed_at: string | null
@@ -693,6 +700,7 @@ export type Database = {
           creator_id: string
           id?: string
           initiated_by?: string | null
+          livemode?: boolean
           paystack_reference?: string | null
           paystack_transfer_code?: string | null
           processed_at?: string | null
@@ -706,6 +714,7 @@ export type Database = {
           creator_id?: string
           id?: string
           initiated_by?: string | null
+          livemode?: boolean
           paystack_reference?: string | null
           paystack_transfer_code?: string | null
           processed_at?: string | null
@@ -883,9 +892,9 @@ export type Database = {
           p_webhook_secret: string
         }
         Returns: {
-          brand_id: string
-          shop_domain: string
-          shop_id: string
+          linked_brand_id: string
+          linked_domain: string
+          linked_shop_id: string
         }[]
       }
       admin_list_shopify_shops: {
@@ -896,6 +905,16 @@ export type Database = {
           created_at: string
           id: string
           shop_domain: string
+        }[]
+      }
+      apply_paystack_deposit: {
+        Args: { p_amount: number; p_livemode?: boolean; p_reference: string }
+        Returns: {
+          campaign_resumed: boolean
+          deposit_applied: boolean
+          escrow_after: number
+          outcome: string
+          released: number
         }[]
       }
       apply_shopify_refund: {
@@ -912,6 +931,17 @@ export type Database = {
         }[]
       }
       calculate_covo_score: { Args: { p_creator: string }; Returns: number }
+      claim_payout_for_transfer: {
+        Args: {
+          p_payout_id: string
+          p_reference: string
+          p_transfer_code: string
+        }
+        Returns: {
+          claimed: boolean
+          outcome: string
+        }[]
+      }
       confirm_due_commissions: {
         Args: never
         Returns: {
@@ -965,6 +995,35 @@ export type Database = {
       }
       is_admin: { Args: never; Returns: boolean }
       is_direct_client_write: { Args: never; Returns: boolean }
+      mark_payout_settled: {
+        Args: { p_reference: string; p_status: string }
+        Returns: {
+          commissions_changed: number
+          outcome: string
+          payout_updated: boolean
+        }[]
+      }
+      payout_readiness: {
+        Args: { p_creator: string }
+        Returns: {
+          account_last4: string
+          account_name: string
+          bank_name: string
+          confirmed_total: number
+          has_recipient: boolean
+          meets_minimum: boolean
+        }[]
+      }
+      paystack_test_money: {
+        Args: never
+        Returns: {
+          campaign_id: string
+          campaign_title: string
+          current_balance: number
+          test_deposits: number
+          tranche_count: number
+        }[]
+      }
       product_usage: {
         Args: { p_campaign_id: string }
         Returns: {
@@ -975,6 +1034,30 @@ export type Database = {
           links: number
           product_id: string
           revenue: number
+        }[]
+      }
+      purge_test_paystack_data: {
+        Args: never
+        Returns: {
+          escrows_rebalanced: number
+          payouts_removed: number
+          tranches_removed: number
+        }[]
+      }
+      record_click: {
+        Args: {
+          p_campaign_id: string
+          p_creator_id: string
+          p_ip_hash: string
+          p_link_id: string
+          p_product_id: string
+          p_referrer?: string
+          p_user_agent?: string
+          p_window_secs?: number
+        }
+        Returns: {
+          click_id: string
+          counted: boolean
         }[]
       }
       record_shopify_conversion: {
@@ -1008,6 +1091,12 @@ export type Database = {
           released_value: number
         }[]
       }
+      release_payout_claim: {
+        Args: { p_payout_id: string; p_reason: string }
+        Returns: {
+          released: boolean
+        }[]
+      }
       request_creator_payout: {
         Args: never
         Returns: {
@@ -1024,6 +1113,20 @@ export type Database = {
           paused: number
           released: number
           total_value: number
+        }[]
+      }
+      set_payout_recipient: {
+        Args: {
+          p_account_name: string
+          p_bank_code: string
+          p_bank_name: string
+          p_creator: string
+          p_last4: string
+          p_recipient_code: string
+        }
+        Returns: {
+          outcome: string
+          updated: boolean
         }[]
       }
     }

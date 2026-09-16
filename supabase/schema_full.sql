@@ -136,6 +136,10 @@ ALTER TABLE public.creator_profiles
   ADD COLUMN IF NOT EXISTS covo_score_updated_at   TIMESTAMPTZ,
   ADD COLUMN IF NOT EXISTS is_verified             BOOLEAN NOT NULL DEFAULT false,
   ADD COLUMN IF NOT EXISTS bank_account_name       TEXT,
+  -- Dropped again by paystack_payouts.sql (step 17) and never written to.
+  -- Paystack pays a recipient_code, not an account number, so keeping the
+  -- number would expose every creator's bank account in a breach to buy
+  -- nothing. Left here only so this file still matches what it created.
   ADD COLUMN IF NOT EXISTS bank_account_number     TEXT,
   ADD COLUMN IF NOT EXISTS bank_name               TEXT,
   ADD COLUMN IF NOT EXISTS paystack_recipient_code TEXT;

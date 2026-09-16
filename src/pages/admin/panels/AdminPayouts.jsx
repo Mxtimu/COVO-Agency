@@ -38,34 +38,53 @@ export default function AdminPayouts() {
     setLoading(false)
   }
 
-  // Disabled until Paystack is connected.
+  // Two steps, deliberately separate: create the payout row, then ask
+  // Paystack to move the money against it.
   //
-  // This previously inserted a payout row and immediately set the matching
-  // commissions to 'paid'. No money moved — Paystack is not wired — so the
-  // creator's dashboard would show "paid out" against funds they had never
-  // received. Marking money as sent when it has not been is worse than
-  // having no button at all, so the whole path is closed rather than hidden.
+  // They are split because the row is what makes the transfer safe to retry.
+  // paystack-initiate-transfer claims the payout before calling out and
+  // records the reference first, so a lost response still settles when the
+  // webhook arrives. Creating the row inside the same call would leave
+  // nothing to claim if the API failed halfway.
   //
-  // The flag lives in lib/api/creator.js because the creator's own Request
-  // Payout button reads it too. It was declared locally here, so the two
-  // sides disagreed: this panel refused to process payouts while Earnings
-  // happily let creators request them.
-
+  // Commissions become 'paid' only when Paystack confirms the transfer, via
+  // mark_payout_settled from the webhook. Nothing here marks money as sent.
   async function initiatePayout(row) {
     if (!PAYOUTS_ENABLED) return
     setBusy(b => ({ ...b, [row.creator_id]: true }))
-    const { error } = await supabase.from('payouts').insert({
+
+    const { data: payout, error: createError } = await supabase.from('payouts').insert({
       creator_id:     row.creator_id,
       amount:         row.total,
       status:         'pending',
       initiated_by:   session?.user?.id,
       commission_ids: row.ids,
+    }).select('id').single()
+
+    if (createError) {
+      setBusy(b => ({ ...b, [row.creator_id]: false }))
+      return alert(`Could not create payout: ${createError.message}`)
+    }
+
+    const { data: { session: s } } = await supabase.auth.getSession()
+    const { data, error: fnError } = await supabase.functions.invoke('paystack-initiate-transfer', {
+      body:    { payout_id: payout.id },
+      headers: { Authorization: `Bearer ${s?.access_token}` },
     })
-    // Commissions become 'paid' only when Paystack confirms the transfer,
-    // via the transfer.success branch of the paystack-webhook function.
-    if (error) alert(`Could not create payout: ${error.message}`)
-    else await load()
+
     setBusy(b => ({ ...b, [row.creator_id]: false }))
+
+    if (fnError || data?.error) {
+      // The function releases its own claim on failure, so the payout is
+      // back to pending and can be retried once the cause is fixed.
+      alert(`Transfer failed: ${data?.error ?? fnError?.message}\n\nThe payout is still pending — you can retry it.`)
+    } else if (data?.needs_otp) {
+      alert(`Transfer created, but Paystack is holding it for OTP confirmation.\n\nApprove it in the Paystack dashboard to release the money. Reference: ${data.reference}`)
+    } else {
+      alert(`Transfer sent — R${Number(row.total).toFixed(2)} to ${row.name || 'creator'}.\n\nIt shows as paid once Paystack confirms. Reference: ${data?.reference}`)
+    }
+
+    await load()
   }
 
   if (loading) return <p style={{ color: 'var(--muted)' }}>Loading payout data…</p>

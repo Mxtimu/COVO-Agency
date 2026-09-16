@@ -8,17 +8,17 @@ type Payout     = Database['public']['Tables']['payouts']['Row']
 // payout fees proportionate to the amount being moved.
 export const MIN_PAYOUT = 250
 
-// Paystack transfers are not wired yet, so nothing can actually move money.
-// AdminPayouts already refused to create payout rows for that reason, but the
-// creator-facing button stayed live: a creator could request a withdrawal,
-// watch their available balance drop by it — requestPayout() reserves the
-// commissions — and then wait indefinitely for a transfer no code path can
-// initiate. Showing someone their money leaving for a queue nobody drains is
-// worse than telling them payouts are not open yet.
+// Paystack transfers are wired: a creator registers a bank account, which
+// Paystack verifies and returns a recipient for, and an admin sends the
+// payout against it from AdminPayouts. Settlement comes back through
+// mark_payout_settled on the transfer.success webhook.
 //
-// One flag, read by both sides, so they cannot drift apart again. Flip it when
-// the Paystack transfer integration lands.
-export const PAYOUTS_ENABLED = false
+// One flag, read by both sides, so they cannot drift apart. It was false for
+// as long as nothing could move money — a creator could otherwise request a
+// withdrawal, watch their available balance drop by it (requestPayout()
+// reserves the commissions), and wait indefinitely for a transfer no code
+// path could initiate.
+export const PAYOUTS_ENABLED = true
 
 // PostgREST returns an embedded 1-to-1 as either an object or a single-element
 // array depending on how it resolved the relationship, so every read of one

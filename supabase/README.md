@@ -32,6 +32,7 @@ and the other became a no-op, which is how `commissions` ended up without the
 | 14 | `click_deduplication.sql` | Counts a click once per visitor; drops the dead `clicks` column |
 | 15 | `paystack_atomic.sql` | Deposit and payout settlement as one transaction each |
 | 16 | `paystack_test_mode.sql` | Tracks test-mode money; adds the pre-go-live purge |
+| 17 | `paystack_payouts.sql` | Payout recipients and transfer claiming; drops `bank_account_number` |
 | — | `verify_checks.sql` | **Run this after any change.** Every check as one result set. |
 | — | `verify_hardening.sql` | Runtime proof the guards reject a browser write. Rolls itself back. |
 | — | `test_money_paths.sql` | 44 assertions over the plpgsql that moves money. Rolls itself back. |
@@ -97,6 +98,8 @@ npx supabase functions deploy <name> --no-verify-jwt --project-ref nyeulzucksldw
 | `affiliate-redirect` | anyone | public by design; validates the slug and URL scheme |
 | `generate-affiliate-assets` | admins | reads `profiles.role` with the service role |
 | `commission-confirmation` | admins | reads `profiles.role` with the service role |
+| `paystack-create-recipient` | the creator themselves | their own JWT; registers only their own account |
+| `paystack-initiate-transfer` | admins | reads `profiles.role` with the service role |
 | `record-conversion` | nobody | **retired**, returns 410. Delete once no storefront calls it |
 
 Every one is deployed with `verify_jwt` off, and that is deliberate rather
