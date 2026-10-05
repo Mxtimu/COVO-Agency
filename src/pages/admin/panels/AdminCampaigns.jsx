@@ -1,8 +1,10 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../../../lib/supabase'
 import Icon from '../../../components/ui/Icon'
+import { useToast } from '../../../components/ui/Toast'
 
 export default function AdminCampaigns() {
+  const toast = useToast()
   const [campaigns, setCampaigns] = useState([])
   const [loading,   setLoading]   = useState(true)
   const [busy,      setBusy]      = useState(null)
@@ -31,11 +33,11 @@ export default function AdminCampaigns() {
       status:      'active',
     }, { onConflict: 'campaign_id' })
 
-    if (escrowError) { setBusy(null); return alert(`Could not create escrow: ${escrowError.message}`) }
+    if (escrowError) { setBusy(null); return toast.error('Could not create the escrow account', escrowError.message) }
 
     const { error } = await supabase.from('campaigns').update({ status: 'active' }).eq('id', campaign.id)
     setBusy(null)
-    if (error) return alert(`Could not approve campaign: ${error.message}`)
+    if (error) return toast.error('Could not approve the campaign', error.message)
     load()
   }
 

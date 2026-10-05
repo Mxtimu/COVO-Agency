@@ -80,6 +80,33 @@ serve(async (req) => {
     return new Response('Unauthorized', { status: 401 })
   }
 
+  // Rate limited AFTER the signature check, deliberately. Counting
+  // unsigned requests would let anyone fill a shop's quota and lock out
+  // its real deliveries — the limit is there to contain a leaked secret,
+  // not to hand out a way to silence a store.
+  const { data: rate, error: rateError } = await supabase.rpc('check_webhook_rate', {
+    p_endpoint:    'shopify-order-webhook',
+    p_actor:       domain,
+    p_limit:       120,
+    p_window_secs: 60,
+  })
+
+  if (rateError) {
+    // Never fail a real order because the counter is unavailable.
+    console.error('rate check failed, allowing through:', rateError.message)
+  } else {
+    const verdict = Array.isArray(rate) ? rate[0] : rate
+    if (verdict && !verdict.allowed) {
+      console.error(`rate limit hit for ${domain}: ${verdict.hits} in the last minute`)
+      // 429 with Retry-After: Shopify backs off and redelivers rather than
+      // dropping the order.
+      return new Response(JSON.stringify({ error: 'Too many requests' }), {
+        status: 429,
+        headers: { 'Content-Type': 'application/json', 'Retry-After': String(verdict.retry_after_secs) },
+      })
+    }
+  }
+
   let payload: Record<string, unknown>
   try {
     payload = JSON.parse(raw)

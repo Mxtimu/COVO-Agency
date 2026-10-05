@@ -1,7 +1,9 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../../../lib/supabase'
+import { useToast } from '../../../components/ui/Toast'
 
 export default function AdminBrands() {
+  const toast = useToast()
   const [brands,  setBrands]  = useState([])
   const [loading, setLoading] = useState(true)
 
@@ -28,7 +30,7 @@ export default function AdminBrands() {
   // that is still pending, and it survives until the next reload.
   async function setStatus(id, status) {
     const { error } = await supabase.from('profiles').update({ status }).eq('id', id)
-    if (error) return alert(`Could not set status to ${status}: ${error.message}`)
+    if (error) return toast.error(`Could not set status to ${status}`, error.message)
     setBrands(prev => prev.map(b => b.id === id ? { ...b, status } : b))
   }
 

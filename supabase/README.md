@@ -33,6 +33,16 @@ and the other became a no-op, which is how `commissions` ended up without the
 | 15 | `paystack_atomic.sql` | Deposit and payout settlement as one transaction each |
 | 16 | `paystack_test_mode.sql` | Tracks test-mode money; adds the pre-go-live purge |
 | 17 | `paystack_payouts.sql` | Payout recipients and transfer claiming; drops `bank_account_number` |
+| 18 | `admin_payout_creation.sql` | Server-computed admin payouts; stops the same earnings being sent twice |
+| 19 | `admin_context.sql` | Admin gates that also work from the SQL Editor. **Must follow 18** — it patches gates those files install |
+| 20 | `creator_identity.sql` | Legal name and phone; checks them against the bank account holder |
+| 21 | `account_deletion.sql` | Anonymise on close, keeping the ledger; refuses while money is in flight |
+| 22 | `webhook_rate_limit.sql` | Per-caller limits on both webhooks, pruned nightly |
+| 23 | `campaign_lifecycle.sql` | **Reverses what pausing means**: a paused campaign keeps paying creators who already hold a link, and only stops new invitations. Adds the 20% low-balance warning and `close_campaign()` |
+| 24 | `email_outbox.sql` | Server-side email, queued. EmailJS is browser-only, so nothing server-side could send mail at all |
+| 25 | `payout_batch.sql` | The monthly payout cycle, R200 minimum with rollover, and the payout/low-balance emails. **Needs 24, and needs 8 re-run first** — `creator_payout_standing` is `LANGUAGE sql`, so Postgres resolves `min_payout()` when the function is *created*, not when it is called, and the file will not install without it |
+| 26 | `free_tier_guardrails.sql` | Free plan: one campaign, 25 creators, 30 days. **Needs 23 and 24** — it replaces `campaign_accepts_new_creators` and sends mail |
+| 27 | `role_claim.sql` | Lets a social sign-up say whether it is a creator or a brand. Without it every OAuth sign-up is a creator, permanently |
 | — | `verify_checks.sql` | **Run this after any change.** Every check as one result set. |
 | — | `verify_hardening.sql` | Runtime proof the guards reject a browser write. Rolls itself back. |
 | — | `test_money_paths.sql` | 44 assertions over the plpgsql that moves money. Rolls itself back. |
@@ -76,6 +86,7 @@ Two `pg_cron` jobs, both installed by the files above:
 |---|---|---|
 | `covo-confirm-commissions` | `0 2 * * *` (04:00 SAST) | `run_commission_cycle()` — release held, then confirm due |
 | `covo-refresh-scores` | `0 3 * * *` (05:00 SAST) | `refresh_all_covo_scores()` |
+| `covo-prune-webhook-hits` | `30 3 * * *` (05:30 SAST) | `prune_webhook_hits()` — keeps the rate-limit table from becoming a log |
 
 ```sql
 SELECT jobname, schedule, active FROM cron.job;                    -- what is scheduled
@@ -98,6 +109,8 @@ npx supabase functions deploy <name> --no-verify-jwt --project-ref nyeulzucksldw
 | `affiliate-redirect` | anyone | public by design; validates the slug and URL scheme |
 | `generate-affiliate-assets` | admins | reads `profiles.role` with the service role |
 | `commission-confirmation` | admins | reads `profiles.role` with the service role |
+| `paystack-initialize-deposit` | the brand themselves | their own JWT; the campaign must be theirs |
+| `delete-account` | the account holder | their own JWT; refuses while money is in flight |
 | `paystack-create-recipient` | the creator themselves | their own JWT; registers only their own account |
 | `paystack-initiate-transfer` | admins | reads `profiles.role` with the service role |
 | `record-conversion` | nobody | **retired**, returns 410. Delete once no storefront calls it |
@@ -113,6 +126,38 @@ Authorisation therefore lives inside each function, where it can be specific.
 `commission-confirmation` shipped with none at all and `verify_jwt` off, which
 made it a public endpoint that drew down brand escrow; it now checks for an
 admin.
+
+### The email worker
+
+`process-email-outbox` drains `email_outbox` through Resend's HTTP API.
+Deploy it like the others, then schedule it:
+
+```
+npx supabase functions deploy process-email-outbox --no-verify-jwt --project-ref nyeulzucksldwlcrbbmo
+```
+
+It needs two secrets. Set them in the **dashboard** (Project → Edge
+Functions → Secrets), not the CLI, so neither lands in shell history:
+
+| Secret | Value |
+|---|---|
+| `RESEND_API_KEY` | the Resend API key (the same one used as the SMTP password) |
+| `CRON_SECRET` | any long random string; the function refuses to run without it |
+| `EMAIL_FROM` | optional, defaults to `COVO <onboarding@resend.dev>` |
+
+**Mail to creators will fail until a domain is verified in Resend.** The
+free tier delivers only to the Resend account's own address
+(covodeveloper@gmail.com). Queued rows are not lost — they record the
+rejection and retry, and `requeue_failed_emails()` re-arms anything that
+gave up once the domain is live. Verify `covo.africa` under Resend →
+Domains and set `EMAIL_FROM` to an address on it.
+
+To check what is waiting:
+
+```sql
+SELECT kind, status, COUNT(*), MAX(last_error) AS last_error
+FROM public.email_outbox GROUP BY kind, status ORDER BY kind;
+```
 
 ## Testing
 
@@ -191,6 +236,26 @@ SELECT * FROM public.purge_test_paystack_data();
 Run the purge **before** the key swap. Afterwards the endpoint rejects test
 events, so any test webhook still in flight would be refused rather than
 cleaned up.
+
+## Running admin functions by hand
+
+`is_admin()` reads `auth.uid()` from the request's JWT. The SQL Editor has no
+JWT, so `auth.uid()` is NULL there and every admin-gated RPC refused — including
+`abandon_payout()`, which exists specifically to be run by hand when a payout
+is stuck.
+
+`can_act_as_admin()` asks the right question instead: is the caller an admin,
+**or** not a browser at all. `current_user` is `authenticated` or `anon` only
+for a request that came through PostgREST; the SQL Editor runs as `postgres`
+and an Edge Function as `service_role`, both of which already bypass RLS.
+Admitting them grants nothing they did not have.
+
+`is_admin()` itself is untouched — it is load-bearing in RLS policies, and
+those must keep answering strictly about the JWT.
+
+`admin_create_payout()` deliberately still requires a real admin JWT: it
+records `initiated_by = auth.uid()`, so a run without one would write a payout
+nobody initiated.
 
 ## Money invariants
 

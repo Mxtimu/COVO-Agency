@@ -7,6 +7,8 @@ import { AppProvider, useApp } from './context/AppContext'
 import Landing      from './pages/Landing'
 import Auth         from './pages/Auth'
 import AuthCallback from './pages/auth/AuthCallback'
+import ResetPassword from './pages/auth/ResetPassword'
+import { Privacy, Terms, DataDeletion } from './pages/legal/LegalPages'
 
 // Everything behind a login is loaded on demand. A visitor reading the
 // marketing page has no use for three dashboards and seven admin panels, and
@@ -70,6 +72,13 @@ export default function App() {
           <Route path="/auth"              element={<Auth />} />
           <Route path="/auth/admin"        element={<AdminLogin />} />
           <Route path="/auth/callback"     element={<AuthCallback />} />
+          <Route path="/auth/reset"        element={<ResetPassword />} />
+
+          {/* Public, and reachable without an account — Meta checks that
+              these load before a Facebook app can go Live. */}
+          <Route path="/privacy"           element={<Privacy />} />
+          <Route path="/terms"             element={<Terms />} />
+          <Route path="/data-deletion"     element={<DataDeletion />} />
 
           {/* Onboarding */}
           <Route path="/onboarding"        element={<OnboardRoute><Onboarding /></OnboardRoute>} />

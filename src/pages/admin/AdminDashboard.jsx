@@ -9,6 +9,7 @@ import AdminApplications from './panels/AdminApplications'
 import AdminPayouts      from './panels/AdminPayouts'
 import AdminDisputes     from './panels/AdminDisputes'
 import Icon              from '../../components/ui/Icon'
+import { ToastProvider } from '../../components/ui/Toast'
 
 const PANELS = [
   { id: 'overview',     icon: 'overview',     label: 'Overview'     },
@@ -32,6 +33,9 @@ export default function AdminDashboard() {
   const initials = ((user?.first?.[0] || '') + (user?.last?.[0] || '')).toUpperCase() || 'A'
 
   return (
+    // Wraps the whole shell so any panel can raise a notification without
+    // the state being threaded down through seven of them.
+    <ToastProvider>
     <div className="db-layout">
       {sidebarOpen && <div className="db-overlay" onClick={() => setSidebarOpen(false)} />}
 
@@ -89,5 +93,6 @@ export default function AdminDashboard() {
         </div>
       </div>
     </div>
+    </ToastProvider>
   )
 }

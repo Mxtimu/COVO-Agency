@@ -82,6 +82,28 @@ serve(async (req) => {
     )
   }
 
+  // Same reasoning as the Shopify endpoint: after the HMAC, so a flood of
+  // unsigned noise cannot exhaust the budget for real events.
+  const { data: rate, error: rateError } = await supabase.rpc('check_webhook_rate', {
+    p_endpoint:    'paystack-webhook',
+    p_actor:       EXPECTED_LIVEMODE ? 'live' : 'test',
+    p_limit:       120,
+    p_window_secs: 60,
+  })
+
+  if (rateError) {
+    console.error('rate check failed, allowing through:', rateError.message)
+  } else {
+    const verdict = Array.isArray(rate) ? rate[0] : rate
+    if (verdict && !verdict.allowed) {
+      console.error(`rate limit hit: ${verdict.hits} paystack events in the last minute`)
+      return new Response(JSON.stringify({ error: 'Too many requests' }), {
+        status: 429,
+        headers: { 'Content-Type': 'application/json', 'Retry-After': String(verdict.retry_after_secs) },
+      })
+    }
+  }
+
   try {
     switch (event.event) {
       // ── Brand escrow deposit ──────────────────────────────────────

@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../../../lib/supabase'
+import { invokeFunction } from '../../../lib/api/functions'
 import Icon from '../../../components/ui/Icon'
 
 const FILTERS = ['pending', 'approved', 'rejected', 'all']
@@ -58,16 +59,19 @@ export default function AdminApplications() {
   async function approve(app) {
     setBusy(app.id); setError('')
 
-    const { data: { session } } = await supabase.auth.getSession()
-    const { data, error: fnError } = await supabase.functions.invoke('generate-affiliate-assets', {
-      body: { creator_id: app.creator_id, campaign_id: app.campaign_id },
-      headers: { Authorization: `Bearer ${session?.access_token}` },
+    // invokeFunction reads the body back off the error, so a real reason —
+    // "This campaign has no products available to link to", say — reaches the
+    // admin instead of supabase-js's generic non-2xx string.
+    const { error: fnError } = await invokeFunction('generate-affiliate-assets', {
+      creator_id: app.creator_id, campaign_id: app.campaign_id,
     })
 
-    if (fnError || data?.error) {
+    if (fnError) {
       setBusy(null)
-      return setError(data?.error ?? fnError.message ?? 'Could not generate affiliate links.')
+      return setError(fnError)
     }
+
+    const { data: { session } } = await supabase.auth.getSession()
 
     const { error: updateError } = await supabase
       .from('campaign_applications')

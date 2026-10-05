@@ -61,11 +61,38 @@ serve(async (req) => {
     }
 
     const [{ data: campaign }, { data: creator }] = await Promise.all([
-      supabase.from('campaigns').select('brand_id').eq('id', campaign_id).single(),
+      supabase.from('campaigns').select('brand_id, status, title').eq('id', campaign_id).single(),
       supabase.from('profiles').select('full_name, email').eq('id', creator_id).single(),
     ])
 
     if (!campaign) return json({ error: 'Campaign not found' }, 404)
+
+    // The other half of "pausing stops new invitations". A paused campaign
+    // keeps paying the creators who already hold a link — see the note in
+    // campaign_lifecycle.sql — but minting a NEW link is what an invitation
+    // is, and that is exactly what must stop while the brand is short.
+    //
+    // Nothing enforced this before: approving a creator into a campaign with
+    // R0 behind it minted a link and sent the welcome email, and every sale
+    // the creator then made landed as 'held'. They would have been promoting
+    // for a promise COVO could not keep, having been told nothing.
+    const { data: acceptsNew, error: gateError } = await supabase
+      .rpc('campaign_accepts_new_creators', { p_campaign_id: campaign_id })
+
+    if (gateError) {
+      console.error('[generate-affiliate-assets] gate check failed', gateError)
+      return json({ error: 'Could not confirm the campaign is funded. Nothing was approved.' }, 500)
+    }
+
+    if (acceptsNew === false) {
+      return json({
+        error: `"${campaign.title}" is not accepting new creators right now — it is `
+             + `${campaign.status === 'active' ? 'below its R500 funding floor' : campaign.status}. `
+             + `Ask the brand to top up the campaign, then approve this creator again. `
+             + `Creators already on the campaign keep earning in the meantime.`,
+        reason: 'campaign_not_accepting',
+      }, 409)
+    }
     if (!creator)  return json({ error: 'Creator not found' }, 404)
 
     // Brand identity comes from brand_profiles.company_name — profiles.full_name

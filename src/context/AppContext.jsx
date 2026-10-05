@@ -5,7 +5,7 @@ import { supabase } from '../lib/supabase'
 const Ctx = createContext(null)
 
 export function AppProvider({ children }) {
-  const { session, profile, loading } = useAuth()
+  const { session, profile, loading, refreshProfile } = useAuth()
 
   const [links,  setLinks]  = useState(() => JSON.parse(localStorage.getItem('covo_links') || '[]'))
   const [joined, setJoined] = useState([])
@@ -66,7 +66,7 @@ export function AppProvider({ children }) {
   return (
     <Ctx.Provider value={{
       // Supabase-native
-      session, profile, loading, role,
+      session, profile, loading, role, refreshProfile,
       isCreator: role === 'creator',
       isBrand:   role === 'brand',
       isAdmin:   role === 'admin',

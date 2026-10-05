@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../../../lib/supabase'
 import { useApp } from '../../../context/AppContext'
+import { useToast } from '../../../components/ui/Toast'
 
 const TYPE_LABEL = {
   commission_denial:  'Commission Denial',
@@ -10,6 +11,7 @@ const TYPE_LABEL = {
 }
 
 export default function AdminDisputes() {
+  const toast = useToast()
   const { session }    = useApp()
   const [disputes, setDisputes] = useState([])
   const [loading,  setLoading]  = useState(true)
@@ -41,7 +43,10 @@ export default function AdminDisputes() {
       updated_at:       new Date().toISOString(),
     }).eq('id', id)
 
-    if (error) return alert(`Could not ${status === 'resolved' ? 'resolve' : 'dismiss'} this dispute: ${error.message}\n\nYour notes have been kept — try again.`)
+    if (error) return toast.error(
+      `Could not ${status === 'resolved' ? 'resolve' : 'dismiss'} this dispute`,
+      `${error.message} — your notes have been kept, so you can try again.`,
+    )
 
     setDisputes(prev => prev.map(d => d.id === id ? { ...d, status, resolution_notes: notes } : d))
     setResolving(r => { const n = { ...r }; delete n[id]; return n })
@@ -49,7 +54,7 @@ export default function AdminDisputes() {
 
   async function setUnderReview(id) {
     const { error } = await supabase.from('disputes').update({ status: 'under_review' }).eq('id', id)
-    if (error) return alert(`Could not mark this dispute under review: ${error.message}`)
+    if (error) return toast.error('Could not mark this dispute under review', error.message)
     setDisputes(prev => prev.map(d => d.id === id ? { ...d, status: 'under_review' } : d))
   }
 

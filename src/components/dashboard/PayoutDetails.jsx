@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useApp } from '../../context/AppContext'
 import { supabase } from '../../lib/supabase'
 import { formatZAR, MIN_PAYOUT } from '../../lib/api/creator'
+import { invokeFunction } from '../../lib/api/functions'
 import { SA_BANKS } from '../../data/banks'
 import Icon from '../ui/Icon'
 
@@ -44,23 +45,19 @@ export default function PayoutDetails() {
     }
 
     setBusy(true); setError('')
-    const { data: { session: s } } = await supabase.auth.getSession()
 
     // The Edge Function talks to Paystack, which verifies the account before
-    // returning a recipient. An invalid number is refused there, not here.
-    const { data, error: fnError } = await supabase.functions.invoke('paystack-create-recipient', {
-      body: {
-        bank_code:      form.bank_code,
-        account_number: form.account_number.replace(/\s/g, ''),
-        account_name:   form.account_name.trim(),
-      },
-      headers: { Authorization: `Bearer ${s?.access_token}` },
+    // returning a recipient. An invalid number is refused there, not here —
+    // and invokeFunction surfaces that reason rather than the generic
+    // non-2xx string supabase-js raises.
+    const { error: fnError } = await invokeFunction('paystack-create-recipient', {
+      bank_code:      form.bank_code,
+      account_number: form.account_number.replace(/\s/g, ''),
+      account_name:   form.account_name.trim(),
     })
     setBusy(false)
 
-    if (fnError || data?.error) {
-      return setError(data?.error ?? fnError?.message ?? 'Could not save your payout details.')
-    }
+    if (fnError) return setError(fnError)
 
     setForm({ bank_code: '', account_number: '', account_name: '' })
     setEditing(false)
@@ -117,6 +114,26 @@ export default function PayoutDetails() {
             </div>
             <Icon name="verified" size={16} style={{ color: 'var(--success)' }} />
           </div>
+
+          {/* The bank checks the account holder name on a transfer. A
+              mismatch is not caught by us or by Paystack — it fails at the
+              bank, after the creator has earned the money and watched it
+              clear, which is the worst moment to find out. */}
+          {ready?.name_matches === false && (
+            <div style={{ marginTop: '.75rem', padding: '.65rem .85rem', background: 'rgba(245,158,11,.08)', border: '1px solid rgba(245,158,11,.25)', borderRadius: 8, fontSize: '.79rem', color: 'var(--warning)', lineHeight: 1.55 }}>
+              <Icon name="warning" size={13} style={{ verticalAlign: 'text-bottom', marginRight: '.35rem' }} />
+              The legal name on your profile doesn't match this account holder
+              ({ready.account_name}). Banks check that, so a payout would be
+              rejected. Fix whichever is wrong under Account Details below.
+            </div>
+          )}
+
+          {ready?.has_legal_name === false && (
+            <div style={{ marginTop: '.75rem', padding: '.65rem .85rem', background: 'var(--dark3)', borderRadius: 8, fontSize: '.79rem', color: 'var(--muted)', lineHeight: 1.55 }}>
+              Add your legal name under Account Details so we can check it matches
+              this account before a payout is sent.
+            </div>
+          )}
 
           <p style={{ fontSize: '.78rem', color: 'var(--muted)', marginTop: '.75rem', lineHeight: 1.55 }}>
             We only keep the last four digits — your full account number stays with

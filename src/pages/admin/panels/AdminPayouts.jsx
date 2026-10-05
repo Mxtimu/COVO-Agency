@@ -2,8 +2,11 @@ import { useState, useEffect } from 'react'
 import { supabase } from '../../../lib/supabase'
 import { useApp } from '../../../context/AppContext'
 import { PAYOUTS_ENABLED } from '../../../lib/api/creator'
+import { invokeFunction } from '../../../lib/api/functions'
+import { useToast } from '../../../components/ui/Toast'
 
 export default function AdminPayouts() {
+  const toast = useToast()
   const { session } = useApp()
   const [rows,     setRows]    = useState([]) // confirmed commissions grouped by creator
   const [payouts,  setPayouts] = useState([]) // payout history
@@ -53,35 +56,51 @@ export default function AdminPayouts() {
     if (!PAYOUTS_ENABLED) return
     setBusy(b => ({ ...b, [row.creator_id]: true }))
 
-    const { data: payout, error: createError } = await supabase.from('payouts').insert({
-      creator_id:     row.creator_id,
-      amount:         row.total,
-      status:         'pending',
-      initiated_by:   session?.user?.id,
-      commission_ids: row.ids,
-    }).select('id').single()
+    // The amount and the commission ids are computed in the database, not
+    // sent from here. This used to be a raw insert of whatever this page had
+    // summed, with no check on what was already claimed — so clicking twice
+    // created two payouts over the same earnings and sent two real transfers
+    // for the same money. admin_create_payout() applies the same exclusion
+    // rule request_creator_payout() always had.
+    const { data: created, error: createError } = await supabase
+      .rpc('admin_create_payout', { p_creator: row.creator_id })
 
     if (createError) {
       setBusy(b => ({ ...b, [row.creator_id]: false }))
-      return alert(`Could not create payout: ${createError.message}`)
+      return toast.error('Could not create the payout', createError.message)
     }
 
-    const { data: { session: s } } = await supabase.auth.getSession()
-    const { data, error: fnError } = await supabase.functions.invoke('paystack-initiate-transfer', {
-      body:    { payout_id: payout.id },
-      headers: { Authorization: `Bearer ${s?.access_token}` },
+    const payout = Array.isArray(created) ? created[0] : created
+
+    if (!payout?.payout_id) {
+      setBusy(b => ({ ...b, [row.creator_id]: false }))
+      await load()
+      return toast.info('Nothing to pay out', payout?.outcome ?? 'This creator has no unclaimed confirmed earnings.')
+    }
+
+    const { data, error: fnError } = await invokeFunction('paystack-initiate-transfer', {
+      payout_id: payout.payout_id,
     })
 
     setBusy(b => ({ ...b, [row.creator_id]: false }))
 
-    if (fnError || data?.error) {
+    if (fnError) {
       // The function releases its own claim on failure, so the payout is
       // back to pending and can be retried once the cause is fixed.
-      alert(`Transfer failed: ${data?.error ?? fnError?.message}\n\nThe payout is still pending — you can retry it.`)
+      toast.error('Transfer failed', `${fnError} — the payout is still pending, so you can retry it.`)
     } else if (data?.needs_otp) {
-      alert(`Transfer created, but Paystack is holding it for OTP confirmation.\n\nApprove it in the Paystack dashboard to release the money. Reference: ${data.reference}`)
+      toast.info(
+        'Paystack is holding this transfer for OTP',
+        `Approve it in the Paystack dashboard to release the money. Reference: ${data.reference}`,
+      )
     } else {
-      alert(`Transfer sent — R${Number(row.total).toFixed(2)} to ${row.name || 'creator'}.\n\nIt shows as paid once Paystack confirms. Reference: ${data?.reference}`)
+      // Info rather than success, because it carries the reference. That is
+      // the one value an admin may need to look up later, and a toast that
+      // clears itself after four seconds is where references go to die.
+      toast.info(
+        `Transfer sent — R${Number(payout.amount).toFixed(2)} to ${row.name || 'creator'}`,
+        `It shows as paid once Paystack confirms. Reference: ${data?.reference}`,
+      )
     }
 
     await load()

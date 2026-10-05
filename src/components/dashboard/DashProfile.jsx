@@ -3,6 +3,8 @@ import { supabase } from '../../lib/supabase'
 import { useApp } from '../../context/AppContext'
 import CovoScore from './CovoScore'
 import PayoutDetails from './PayoutDetails'
+import DeleteAccount from './DeleteAccount'
+import SocialAccounts from './SocialAccounts'
 import Icon from '../ui/Icon'
 
 const ALL_NICHES = [
@@ -71,6 +73,9 @@ export default function DashProfile({ user, profile }) {
   // ── Account details edit state ─────────────────────────────────────────────
   const [editingDetails, setEditingDetails] = useState(false)
   const [details, setDetails] = useState({
+    legal_first_name: cp?.legal_first_name || '',
+    legal_last_name:  cp?.legal_last_name  || '',
+    phone:            cp?.phone            || '',
     location:       cp?.location       || '',
     gender:         cp?.gender         || '',
     bio:            cp?.bio            || '',
@@ -84,6 +89,9 @@ export default function DashProfile({ user, profile }) {
 
   function openDetails() {
     setDetails({
+      legal_first_name: cp?.legal_first_name || '',
+      legal_last_name:  cp?.legal_last_name  || '',
+      phone:            cp?.phone            || '',
       location:       cp?.location       || '',
       gender:         cp?.gender         || '',
       bio:            cp?.bio            || '',
@@ -199,6 +207,27 @@ export default function DashProfile({ user, profile }) {
 
           {editingDetails ? (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '.75rem' }}>
+              {/* Legal name sits first because it is the one field here with
+                  a consequence: Paystack pays an account whose holder name
+                  the bank checks, so a mismatch fails the transfer after the
+                  creator has already earned and watched the money clear. */}
+              <div className="form-row" style={{ marginBottom: 0 }}>
+                <div className="form-group" style={{ marginBottom: 0 }}>
+                  <label>Legal first name</label>
+                  <input type="text" placeholder="As it appears on your bank account"
+                    value={details.legal_first_name} onChange={set('legal_first_name')} autoComplete="given-name" />
+                </div>
+                <div className="form-group" style={{ marginBottom: 0 }}>
+                  <label>Legal last name</label>
+                  <input type="text" placeholder="Your surname"
+                    value={details.legal_last_name} onChange={set('legal_last_name')} autoComplete="family-name" />
+                </div>
+              </div>
+              <div className="form-group" style={{ marginBottom: 0 }}>
+                <label>Phone number</label>
+                <input type="tel" placeholder="082 123 4567"
+                  value={details.phone} onChange={set('phone')} autoComplete="tel" />
+              </div>
               <div className="form-group" style={{ marginBottom: 0 }}>
                 <label>Gender</label>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '.4rem', marginTop: '.35rem' }}>
@@ -229,6 +258,8 @@ export default function DashProfile({ user, profile }) {
             </div>
           ) : (
             [
+              ['Legal name', [cp?.legal_first_name, cp?.legal_last_name].filter(Boolean).join(' ') || 'Not set'],
+              ['Phone',      cp?.phone          || 'Not set'],
               ['Location',   cp?.location       || 'Not set'],
               ['Gender',      cp?.gender         || 'Not set'],
               ['Bio',        cp?.bio            || 'Not set'],
@@ -288,6 +319,15 @@ export default function DashProfile({ user, profile }) {
         </div>
 
       </div>
+
+      {/* What a brand looks at when deciding, so it sits with the rest of the
+          profile rather than behind a tab. */}
+      <div style={{ marginTop: '1.25rem' }}>
+        <SocialAccounts profile={profile} />
+      </div>
+
+      {/* Last on the page, and the only thing here with a red rule. */}
+      <DeleteAccount />
     </>
   )
 }

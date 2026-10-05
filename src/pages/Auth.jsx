@@ -6,9 +6,12 @@ import {
   signInBrand,
   signUpCreator,
   signInCreator,
+  signInWithProvider,
+  ENABLED_PROVIDERS,
   authErrorMessage,
   isExistingUser,
 } from '../lib/api/auth'
+import { ProviderMark } from '../components/ui/BrandMark'
 import { sendPasswordReset } from '../lib/api/emailjs'
 import Icon from '../components/ui/Icon'
 
@@ -40,6 +43,35 @@ const CREATOR_LEFT = {
   avatars: [['#D2B8F2','A'],['#C3CE94','L'],['#C1B7AA','M'],['#634D3F','J'],['#10B981','P']],
 }
 
+// Turns what Supabase or the provider put in the callback URL into something
+// worth reading. These arrive as a raw description in ?error= — the provider's
+// own wording, which is written for developers.
+function oauthErrorMessage(raw) {
+  if (!raw) return ''
+
+  const text = String(raw)
+
+  if (/provider is not enabled|could not be found/i.test(text)) {
+    return 'That sign-in method is not available yet. Use email, or another option above.'
+  }
+  if (/access_denied|denied your request|user denied/i.test(text)) {
+    return 'You cancelled that sign-in. Nothing has changed — try again when you are ready.'
+  }
+  if (/oauth_failed/i.test(text)) {
+    return "That sign-in didn't complete. Please try again, or use your email address."
+  }
+  if (/email.*(already|exists|taken)/i.test(text)) {
+    return 'An account with that email already exists. Sign in with the method you used first.'
+  }
+  if (/server_error|temporarily/i.test(text)) {
+    return 'The sign-in service is having a moment. Please try again shortly.'
+  }
+
+  // Anything unrecognised is still shown — a vague message is worse than the
+  // provider's own words, even when those are awkward.
+  return text
+}
+
 export default function Auth() {
   const navigate = useNavigate()
   const [params] = useSearchParams()
@@ -50,9 +82,13 @@ export default function Auth() {
   const [userType,     setUserType]     = useState(params.get('type') || null) // null = role picker
   const [creatorEmail, setCreatorEmail] = useState(false)
   const [view,         setView]         = useState('form') // 'form' | 'forgot' | 'forgot-sent'
-  const [error,        setError]        = useState('')
+  // AuthCallback bounces failures here as ?error=…, and nothing was reading
+  // it — a creator whose OAuth sign-in failed landed back on this page with
+  // no explanation and no reason not to try the same thing again.
+  const [error,        setError]        = useState(() => oauthErrorMessage(params.get('error')))
   const [info,         setInfo]         = useState('')
   const [busy,         setBusy]         = useState(false)
+  const [oauthBusy,    setOauthBusy]    = useState(null)   // provider id mid-redirect
   const [form,         setForm]         = useState({ first: '', last: '', company: '', email: '', pass: '', confirm: '' })
 
   useEffect(() => {
@@ -66,6 +102,23 @@ export default function Auth() {
   }, [session, loading, role])
 
   const set = k => e => { setError(''); setInfo(''); setForm(f => ({ ...f, [k]: e.target.value })) }
+
+  // signInWithOAuth navigates away on success, so the busy state is only ever
+  // cleared when something went wrong and we are still here.
+  // userType is what the picker collected. Passing it is the whole fix: it
+  // used to be dropped here, so every social sign-up became a creator.
+  async function oauth(providerId) {
+    setOauthBusy(providerId); setError(''); setInfo('')
+    // userType is passed only on signup. On login the account already exists
+    // and its type is not up for renegotiation — passing it would silently
+    // convert an untouched creator account that someone happened to sign in
+    // to from the brand gateway.
+    const { error } = await signInWithProvider(providerId, isSignup ? userType : null)
+    if (error) {
+      setOauthBusy(null)
+      setError(authErrorMessage(error))
+    }
+  }
 
   function pickType(t) {
     setUserType(t); setError(''); setInfo(''); setView('form'); setCreatorEmail(false)
@@ -149,6 +202,15 @@ export default function Auth() {
           <h1 className="auth-picker-title">{isLogin ? 'Welcome back' : 'Join COVO'}</h1>
           <p className="auth-picker-sub">{isLogin ? 'Continue as...' : 'Who are you joining as?'}</p>
 
+          {/* A failed OAuth round trip returns here with no ?type, so it lands
+              on the picker rather than a form — the error has to be shown on
+              this view too or it is lost. */}
+          {error && (
+            <div className="error-banner" style={{ maxWidth: 520, margin: '0 auto 1.25rem', textAlign: 'left' }}>
+              {error}
+            </div>
+          )}
+
           <div className="auth-picker-cards">
             <div className="auth-pick-card brand" onClick={() => pickType('brand')}>
               <div className="pick-icon">
@@ -220,6 +282,48 @@ export default function Auth() {
   )
 
   // ── BRAND FORM ───────────────────────────────────────────────────────────────
+  // Both gateways offer the same providers, from one definition.
+  //
+  // This block used to sit inside creatorContent only, so the brand side had
+  // email and password and nothing else. That made the account-type claim
+  // inert: OAuth could only ever be started from the creator gateway, so
+  // userType was always 'creator' by the time signInWithProvider saw it and
+  // there was never a mismatch to claim. A brand genuinely could not sign up
+  // with Google or Facebook, which is the bug role_claim.sql was written for.
+  //
+  // One definition rather than a copy per gateway — a copy is how the two
+  // sides drift until a provider is enabled on one and not the other.
+  //
+  // Only providers actually configured in Supabase appear here;
+  // ENABLED_PROVIDERS is the switch. An unconfigured one bounces the person
+  // back to /auth with "provider is not enabled", which they can do nothing
+  // about, so it is not offered.
+  const socialBlock = ENABLED_PROVIDERS.length > 0 && (
+    <>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '.65rem', marginBottom: '1.1rem' }}>
+        {ENABLED_PROVIDERS.map(p => (
+          <button
+            key={p.id}
+            className="social-btn-lg"
+            onClick={() => oauth(p.id)}
+            disabled={oauthBusy !== null}
+          >
+            <span className="s-icon-lg" style={{ display: 'flex', alignItems: 'center' }}>
+              <ProviderMark provider={p.id} />
+            </span>
+            {oauthBusy === p.id ? `Opening ${p.label}…` : `Continue with ${p.label}`}
+          </button>
+        ))}
+      </div>
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: '.75rem', margin: '0 0 1.1rem', color: 'var(--muted)', fontSize: '.75rem' }}>
+        <span style={{ flex: 1, height: 1, background: 'var(--border)' }} />
+        or
+        <span style={{ flex: 1, height: 1, background: 'var(--border)' }} />
+      </div>
+    </>
+  )
+
   const brandContent = (
     <>
       <div className="auth-box-header">
@@ -229,6 +333,13 @@ export default function Auth() {
 
       {error && <div className="error-banner" style={{ marginTop: '.75rem' }}>{error}</div>}
       {info  && <div className="success-banner" style={{ marginTop: '.75rem' }}>{info}</div>}
+
+      {/* Login only, deliberately. Brand SIGN-UP stays email and password so
+          the first/last name fields cannot be skipped — an OAuth sign-up
+          would hand us the provider's display name instead. A brand links
+          Google or Facebook afterwards from Settings → Account, and then it
+          appears here to sign in with. */}
+      {!isSignup && <div style={{ marginTop: '1.25rem' }}>{socialBlock}</div>}
 
       {isSignup ? (
         <>
@@ -242,7 +353,7 @@ export default function Auth() {
             <div className="form-group"><label>Password</label><input type="password" placeholder="At least 8 characters" value={form.pass} onChange={set('pass')} autoComplete="new-password" /></div>
             <div className="form-group"><label>Confirm password</label><input type="password" placeholder="Repeat your password" value={form.confirm} onChange={set('confirm')} autoComplete="new-password" /></div>
             <button type="submit" className="btn-full" disabled={busy}>{busy ? 'Creating account…' : 'Create account →'}</button>
-            <p className="auth-terms">By registering you agree to our <a href="#">Terms of Service</a> and <a href="#">Privacy Policy</a></p>
+            <p className="auth-terms">By registering you agree to our <Link to="/terms">Terms of Service</Link> and <Link to="/privacy">Privacy Policy</Link></p>
           </form>
           <p style={{ textAlign: 'center', marginTop: '1.25rem', fontSize: '.84rem', color: 'var(--muted)' }}>
             Already have an account?{' '}
@@ -282,11 +393,8 @@ export default function Auth() {
 
       {!creatorEmail ? (
         <>
-          {/* Social sign-in is deliberately absent.
-              Facebook and TikTok were never configured on the Supabase project
-              and would have failed on click. Google worked, but is held back so
-              social login ships as one reviewed piece rather than one provider
-              at a time — a half-present row of options reads as broken. */}
+          {socialBlock}
+
           <button className="social-btn-lg" style={{ marginBottom: '1.25rem' }} onClick={() => { setCreatorEmail(true); setError(''); setInfo('') }}>
             <span className="s-icon-lg">@</span>Continue with Email
           </button>
@@ -315,7 +423,7 @@ export default function Auth() {
               <div className="form-group"><label>Password</label><input type="password" placeholder="At least 8 characters" value={form.pass} onChange={set('pass')} autoComplete="new-password" /></div>
               <div className="form-group"><label>Confirm password</label><input type="password" placeholder="Repeat your password" value={form.confirm} onChange={set('confirm')} autoComplete="new-password" /></div>
               <button type="submit" className="btn-full" disabled={busy}>{busy ? 'Creating account…' : 'Create creator account →'}</button>
-              <p className="auth-terms">By registering you agree to our <a href="#">Terms of Service</a> and <a href="#">Privacy Policy</a></p>
+              <p className="auth-terms">By registering you agree to our <Link to="/terms">Terms of Service</Link> and <Link to="/privacy">Privacy Policy</Link></p>
             </form>
           ) : (
             <form onSubmit={creatorLogin}>

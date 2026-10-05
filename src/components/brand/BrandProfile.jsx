@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react'
 import { useApp } from '../../context/AppContext'
 import { supabase } from '../../lib/supabase'
+import DeleteAccount from '../dashboard/DeleteAccount'
+import LinkedLogins from '../settings/LinkedLogins'
 
 const INDUSTRIES = [
   'Fashion & Apparel', 'Beauty & Skincare', 'Health & Wellness',
@@ -149,6 +151,8 @@ export default function BrandProfile() {
           </div>
         </div>
       </div>
+      <LinkedLogins />
+      <DeleteAccount />
     </>
   )
 }

@@ -93,3 +93,21 @@ const _moneyColumns: Array<keyof Commission> = [
   'external_order_id', 'creator_id', 'campaign_id',
 ]
 void _moneyColumns
+
+// ── The payout minimum, pinned from the TypeScript side ──────────────
+// MIN_PAYOUT is a copy of public.min_payout() (creator_payouts.sql), kept
+// so the dashboard can explain the rule without a round trip. A copy that
+// drifts is worse than no copy: the UI would invite a creator to withdraw
+// an amount the database then refuses, with no reason they could act on.
+//
+// `const x: 200 = MIN_PAYOUT` is the assertion. MIN_PAYOUT is a const, so
+// its type is the literal 200; change it to 250 and its type becomes 250
+// and this line stops compiling. test_money_paths.sql asserts the same
+// number on the database side, so changing either one alone fails.
+//
+// If the minimum really should change, change it in three places: here,
+// public.min_payout(), and assertion 16a in test_money_paths.sql.
+import { MIN_PAYOUT } from './api/creator'
+
+const _payoutMinimumIsPinnedAt200: 200 = MIN_PAYOUT
+void _payoutMinimumIsPinnedAt200

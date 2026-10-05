@@ -1,8 +1,10 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../../../lib/supabase'
 import Icon from '../../../components/ui/Icon'
+import { useToast } from '../../../components/ui/Toast'
 
 export default function AdminCreators() {
+  const toast = useToast()
   const [creators, setCreators] = useState([])
   const [loading,  setLoading]  = useState(true)
   const [busy,     setBusy]     = useState(null) // { [id]: { score, status } }
@@ -30,7 +32,7 @@ export default function AdminCreators() {
   // approved creator who was still pending in the database.
   async function setStatus(id, status) {
     const { error } = await supabase.from('profiles').update({ status }).eq('id', id)
-    if (error) return alert(`Could not set status to ${status}: ${error.message}`)
+    if (error) return toast.error(`Could not set status to ${status}`, error.message)
     setCreators(prev => prev.map(c => c.id === id ? { ...c, status } : c))
   }
 
@@ -41,7 +43,7 @@ export default function AdminCreators() {
     setBusy(id)
     const { data, error } = await supabase.rpc('refresh_covo_score', { p_creator: id })
     setBusy(null)
-    if (error) return alert(`Could not recalculate: ${error.message}`)
+    if (error) return toast.error('Could not recalculate the score', error.message)
 
     setCreators(prev => prev.map(c => {
       if (c.id !== id) return c

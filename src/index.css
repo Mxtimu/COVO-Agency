@@ -1334,3 +1334,78 @@ body {
   .niche-grid { gap: .5rem; }
   .niche-pill { font-size: .8rem; padding: .45rem .85rem; }
 }
+
+/* ── Toast stack (admin) ──────────────────────────────────────────────
+   Replaces alert() in the admin panels. Stacks upward from the bottom
+   right so the newest sits closest to where the eye already is, and
+   scrolls if a run of failures piles up rather than growing off screen. */
+.toast-stack {
+  position: fixed; bottom: 1.5rem; right: 1.5rem; z-index: 1000;
+  display: flex; flex-direction: column-reverse; gap: .6rem;
+  max-height: calc(100vh - 3rem); overflow-y: auto;
+  width: min(380px, calc(100vw - 2rem));
+  pointer-events: none;
+}
+.toast-card {
+  pointer-events: auto;
+  display: grid; grid-template-columns: auto 1fr auto; gap: .2rem .7rem;
+  align-items: start;
+  background: var(--dark2); border: 1px solid var(--border);
+  border-left-width: 3px;
+  border-radius: 10px; padding: .8rem .9rem;
+  box-shadow: 0 8px 24px rgba(0,0,0,.35);
+  animation: toast-in .22s ease-out;
+}
+@keyframes toast-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+
+.toast-success { border-left-color: var(--success); }
+.toast-error   { border-left-color: #EF4444; }
+.toast-info    { border-left-color: var(--sage); }
+
+.toast-mark { grid-row: 1 / span 2; margin-top: .1rem; }
+.toast-success .toast-mark { color: var(--success); }
+.toast-error   .toast-mark { color: #FCA5A5; }
+.toast-info    .toast-mark { color: var(--sage); }
+
+.toast-title  { font-size: .85rem; font-weight: 600; line-height: 1.45; color: var(--warm-white); }
+.toast-detail {
+  font-size: .78rem; color: var(--muted); line-height: 1.5; margin-top: .2rem;
+  /* References and ids are copied out of these, so let them wrap and select. */
+  word-break: break-word; user-select: text;
+}
+.toast-close {
+  grid-row: 1 / span 2;
+  background: none; border: none; color: var(--muted); cursor: pointer;
+  padding: 0 0 0 .2rem; line-height: 1; align-self: start;
+}
+.toast-close:hover { color: var(--warm-white); }
+.toast-close:focus-visible { outline: 2px solid var(--sage); outline-offset: 2px; border-radius: 3px; }
+
+@media (max-width: 520px) {
+  .toast-stack { right: 1rem; left: 1rem; bottom: 1rem; width: auto; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .toast-card { animation: none; }
+}
+
+/* ── Legal pages (privacy, terms, data deletion) ──────────────────────
+   Long-form reading, so the measure is capped near 65 characters and the
+   rhythm is set by the headings rather than by boxes. */
+.legal-body { font-size: .94rem; line-height: 1.75; color: var(--tan); }
+.legal-body h2 {
+  font-family: var(--font-serif); font-weight: 400;
+  font-size: 1.25rem; color: var(--warm-white);
+  margin: 2.5rem 0 .75rem; letter-spacing: -.01em;
+}
+.legal-body h3 {
+  font-size: .88rem; font-weight: 700; color: var(--sage);
+  text-transform: uppercase; letter-spacing: .07em;
+  margin: 1.75rem 0 .5rem;
+}
+.legal-body p  { margin: 0 0 1rem; max-width: 65ch; }
+.legal-body ul,
+.legal-body ol { margin: 0 0 1rem; padding-left: 1.2rem; max-width: 65ch; }
+.legal-body li { margin-bottom: .5rem; }
+.legal-body strong { color: var(--warm-white); font-weight: 600; }
+.legal-body a { color: var(--sage); }
+.legal-body > :first-child { margin-top: 0; }

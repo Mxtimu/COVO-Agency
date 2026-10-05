@@ -59,6 +59,7 @@ DECLARE
   _n        INT;
   _v        NUMERIC;
   _ids      UUID[];
+  _fresh    UUID := gen_random_uuid();
 BEGIN
   -- ── Fixtures ───────────────────────────────────────────────────────
   -- auth.users rows are required by the profiles FK.
@@ -212,7 +213,7 @@ BEGIN
   SELECT COALESCE(SUM(net_commission), 0) INTO _v FROM public.commissions
    WHERE creator_id = _creator AND status = 'confirmed';
 
-  IF _v >= 250 THEN
+  IF _v >= public.min_payout() THEN
     SELECT * INTO _r FROM public.request_creator_payout();
     PERFORM pg_temp.check_eq('8a payout claims the confirmed total', _r.amount, _v);
 
@@ -329,6 +330,299 @@ BEGIN
    WHERE id = ANY(_ids) AND status = 'confirmed';
   PERFORM pg_temp.check_eq('12f reversal makes them claimable again', _n,
                            COALESCE(ARRAY_LENGTH(_ids, 1), 0));
+
+  -- ══ 13. Pausing stops invitations, not earnings ══════════════════
+  -- The behaviour campaign_lifecycle.sql reversed. A creator who already
+  -- holds a link is mid-campaign: posts are published, clicks are landing.
+  -- Refusing their sale because the brand's balance dipped charged them
+  -- for the brand's shortfall. Now the sale is recorded and held, which
+  -- is the honest answer — the work counted, the money is not there yet.
+  UPDATE public.campaign_escrow
+     SET balance = 10000, total_deposited = 10000, status = 'active', closed_at = NULL
+   WHERE id = _escrow;
+  UPDATE public.campaigns SET status = 'active' WHERE id = _campaign;
+
+  UPDATE public.campaigns       SET status = 'paused' WHERE id = _campaign;
+  UPDATE public.campaign_escrow SET status = 'paused' WHERE id = _escrow;
+
+  SELECT * INTO _r FROM public.record_shopify_conversion(
+    _link, 'ORDER-PAUSED', 1000, 'ZAR', 'test.myshopify.com', _brand);
+  PERFORM pg_temp.check('13a paused campaign still records the sale',
+                        _r.recorded, COALESCE(_r.reason, ''));
+  -- Balance is 10000 and little is owed, so it is funded: pending, not held.
+  PERFORM pg_temp.check('13b and pays it, because the money is there',
+                        _r.status = 'pending', COALESCE(_r.status, 'NULL'));
+
+  -- But no new creator may be invited onto it while it is paused.
+  PERFORM pg_temp.check('13c paused campaign accepts no new creators',
+                        public.campaign_accepts_new_creators(_campaign) = false, '');
+
+  -- A funded, active campaign does.
+  UPDATE public.campaigns       SET status = 'active' WHERE id = _campaign;
+  UPDATE public.campaign_escrow SET status = 'active' WHERE id = _escrow;
+  PERFORM pg_temp.check('13d funded active campaign accepts new creators',
+                        public.campaign_accepts_new_creators(_campaign) = true, '');
+
+  -- Below the R500 floor it stops accepting them even while 'active'.
+  UPDATE public.campaign_escrow SET balance = 400 WHERE id = _escrow;
+  PERFORM pg_temp.check('13e below the floor, no new creators',
+                        public.campaign_accepts_new_creators(_campaign) = false, '');
+
+  -- A closed campaign refuses the sale outright. Paused means "wait";
+  -- closed means "over", and the two must not be confused.
+  UPDATE public.campaign_escrow SET balance = 10000 WHERE id = _escrow;
+  UPDATE public.campaigns SET status = 'closed' WHERE id = _campaign;
+  SELECT * INTO _r FROM public.record_shopify_conversion(
+    _link, 'ORDER-CLOSED', 1000, 'ZAR', 'test.myshopify.com', _brand);
+  PERFORM pg_temp.check('13f closed campaign refuses the sale',
+                        NOT _r.recorded, COALESCE(_r.reason, ''));
+  UPDATE public.campaigns SET status = 'active' WHERE id = _campaign;
+
+
+  -- ══ 14. Low-balance alerts are claimed exactly once ══════════════
+  -- Two runs of the alert job must not email the brand twice.
+  UPDATE public.campaign_escrow
+     SET balance = 400, total_deposited = 10000, low_balance_notified_at = NULL
+   WHERE id = _escrow;
+
+  SELECT COUNT(*) INTO _n FROM public.claim_low_balance_alerts()
+   WHERE campaign_id = _campaign;
+  PERFORM pg_temp.check_eq('14a a low campaign is claimed once', _n, 1);
+
+  SELECT COUNT(*) INTO _n FROM public.claim_low_balance_alerts()
+   WHERE campaign_id = _campaign;
+  PERFORM pg_temp.check_eq('14b the second run claims nothing', _n, 0);
+
+  -- A top-up re-arms it, so the next dip is announced rather than
+  -- swallowed by the notice from the last one.
+  UPDATE public.campaign_escrow SET balance = 10000 WHERE id = _escrow;
+  PERFORM public.rearm_low_balance_alert(_campaign);
+  SELECT COUNT(*) INTO _n FROM public.campaign_escrow
+   WHERE id = _escrow AND low_balance_notified_at IS NULL;
+  PERFORM pg_temp.check_eq('14c a top-up re-arms the alert', _n, 1);
+
+  -- Health reflects the ratio, not just the floor: 20% of 10000 is 2000,
+  -- so 1500 is 'low' while being nowhere near R500.
+  UPDATE public.campaign_escrow SET balance = 1500 WHERE id = _escrow;
+  SELECT health INTO _r FROM public.campaign_escrow_health(_brand)
+   WHERE campaign_id = _campaign;
+  PERFORM pg_temp.check('14d 15 pct of deposits reads as low', _r.health = 'low', _r.health);
+
+  UPDATE public.campaign_escrow SET balance = 400 WHERE id = _escrow;
+  SELECT health INTO _r FROM public.campaign_escrow_health(_brand)
+   WHERE campaign_id = _campaign;
+  PERFORM pg_temp.check('14e under R500 reads as below_floor',
+                        _r.health = 'below_floor', _r.health);
+
+
+  -- ══ 15. Closing a campaign returns only what is spare ════════════
+  -- Balance 5000 with 92 still owed inside its return window: the
+  -- refundable figure must exclude the 92. Paying it out to the brand
+  -- would be paying out a creator's earnings.
+  UPDATE public.campaign_escrow
+     SET balance = 5000, total_deposited = 5000, status = 'active',
+         closed_at = NULL, refundable_amount = NULL
+   WHERE id = _escrow;
+  UPDATE public.campaigns SET status = 'active' WHERE id = _campaign;
+
+  UPDATE public.commissions SET status = 'denied' WHERE campaign_id = _campaign;
+  INSERT INTO public.commissions (
+    creator_id, campaign_id, product_id, affiliate_link_id, external_order_id,
+    sale_amount, currency, commission_rate, gross_commission, platform_fee,
+    net_commission, status, return_window_days, confirms_at, source)
+  VALUES (_creator, _campaign, _product, _link, 'ORDER-OWED',
+          1000, 'ZAR', 0.10, 100, 8, 92, 'pending', 14, NOW() + INTERVAL '14 days',
+          'shopify');
+
+  SELECT * INTO _r FROM public.close_campaign(_campaign);
+  PERFORM pg_temp.check('15a campaign closes', _r.closed, COALESCE(_r.outcome, ''));
+  PERFORM pg_temp.check_eq('15b refundable excludes the 92 still owed',
+                           _r.refundable, 4908);
+  PERFORM pg_temp.check_eq('15c and reports it as still committed',
+                           _r.still_committed, 92);
+
+  SELECT status INTO _r FROM public.campaigns WHERE id = _campaign;
+  PERFORM pg_temp.check('15d campaign is marked closed', _r.status = 'closed', _r.status);
+
+  -- Closing twice must not offer the money a second time.
+  SELECT * INTO _r FROM public.close_campaign(_campaign);
+  PERFORM pg_temp.check('15e closing twice is refused',
+                        NOT _r.closed, COALESCE(_r.outcome, ''));
+
+  -- ══ 16. The payout minimum has one value ═════════════════════════
+  -- Pinned on the database side. src/lib/database.types.test.ts pins the
+  -- same number on the TypeScript side, so changing one without the
+  -- other fails here or at `npm run typecheck`.
+  PERFORM pg_temp.check_eq('16a minimum payout is R200', public.min_payout(), 200);
+
+  -- And the two functions that gate on it must both read it, rather
+  -- than carrying their own copy of the literal.
+  SELECT COUNT(*)::INT INTO _n
+  FROM pg_proc
+  WHERE proname IN ('request_creator_payout', 'admin_create_payout', 'payout_readiness')
+    AND pronamespace = 'public'::regnamespace
+    AND prosrc LIKE '%min_payout()%';
+  PERFORM pg_temp.check_eq('16b all three payout gates read min_payout()', _n, 3);
+
+
+  -- ══ 17. Rollover is visible to the creator ═══════════════════════
+  -- Under the minimum, the creator must be told it carries over rather
+  -- than shown a number the system quietly will not pay.
+  UPDATE public.commissions SET status = 'denied' WHERE campaign_id = _campaign;
+  INSERT INTO public.commissions (
+    creator_id, campaign_id, product_id, affiliate_link_id, external_order_id,
+    sale_amount, currency, commission_rate, gross_commission, platform_fee,
+    net_commission, status, return_window_days, confirms_at, source)
+  VALUES (_creator, _campaign, _product, _link, 'ORDER-SMALL',
+          500, 'ZAR', 0.10, 50, 4, 46, 'confirmed', 14, NOW(), 'shopify');
+
+  SELECT * INTO _r FROM public.creator_payout_standing(_creator);
+  PERFORM pg_temp.check_eq('17a R46 unclaimed', _r.unclaimed, 46);
+  PERFORM pg_temp.check('17b and is not payable', NOT _r.payable, '');
+  PERFORM pg_temp.check_eq('17c shortfall is R154', _r.shortfall, 154);
+  PERFORM pg_temp.check('17d the creator is told it carries over',
+                        _r.explanation LIKE '%carries over%', _r.explanation);
+
+  -- Over the minimum it becomes payable.
+  INSERT INTO public.commissions (
+    creator_id, campaign_id, product_id, affiliate_link_id, external_order_id,
+    sale_amount, currency, commission_rate, gross_commission, platform_fee,
+    net_commission, status, return_window_days, confirms_at, source)
+  VALUES (_creator, _campaign, _product, _link, 'ORDER-BIG',
+          2000, 'ZAR', 0.10, 200, 16, 184, 'confirmed', 14, NOW(), 'shopify');
+
+  SELECT * INTO _r FROM public.creator_payout_standing(_creator);
+  PERFORM pg_temp.check_eq('17e R230 unclaimed', _r.unclaimed, 230);
+  PERFORM pg_temp.check('17f and is now payable', _r.payable, '');
+
+
+  -- ══ 18. The monthly batch pays once per period ═══════════════════
+  -- The batch skips anyone Paystack cannot be told where to send money,
+  -- so the fixture needs the details a real creator supplies under Payout
+  -- Details. Without them this creator would roll over and 18a would
+  -- read 0 — which is correct behaviour, just not what is under test.
+  UPDATE public.creator_profiles
+  SET paystack_recipient_code = 'RCP_test_fixture',
+      bank_name               = 'Capitec',
+      bank_account_name       = 'T Test Creator',
+      bank_account_last4      = '4821',
+      legal_first_name        = 'Test',
+      legal_last_name         = 'Creator',
+      phone                   = '+27821234567'
+  WHERE id = _creator;
+
+  SELECT * INTO _r FROM public.payout_readiness(_creator);
+  PERFORM pg_temp.check('18pre recipient is on file', _r.has_recipient, '');
+  PERFORM pg_temp.check('18pre2 the account name matches the legal name',
+                        _r.name_matches, '');
+
+  -- The batch is the one place that could create a month of duplicate
+  -- transfers, so the period guard is the assertion that matters most.
+  SELECT * INTO _r FROM public.run_monthly_payout_batch('2026-01-01');
+  PERFORM pg_temp.check_eq('18a batch created one payout', _r.payouts_created, 1);
+  PERFORM pg_temp.check_eq('18b for R230',                 _r.total_amount, 230);
+
+  SELECT * INTO _r FROM public.run_monthly_payout_batch('2026-01-01');
+  PERFORM pg_temp.check_eq('18c re-running the period creates nothing',
+                           _r.payouts_created, 0);
+  PERFORM pg_temp.check('18d and says why',
+                        _r.outcome LIKE '%already been run%', COALESCE(_r.outcome, ''));
+
+  -- The commissions are now spoken for, so standing drops to zero —
+  -- this is what stops the next run paying the same money again.
+  SELECT * INTO _r FROM public.creator_payout_standing(_creator);
+  PERFORM pg_temp.check_eq('18e nothing left unclaimed after the batch',
+                           _r.unclaimed, 0);
+
+  -- A payout email was queued exactly once for it.
+  SELECT COUNT(*)::INT INTO _n FROM public.email_outbox
+   WHERE kind = 'payout_sent';
+  PERFORM pg_temp.check_eq('18f one payout email queued', _n, 1);
+
+  -- The outbox is idempotent per (kind, subject_id): queueing the same
+  -- payout's mail again must not produce a second message.
+  SELECT id INTO _r FROM public.payouts WHERE batch_id IS NOT NULL LIMIT 1;
+  PERFORM public.enqueue_payout_email(_r.id);
+  SELECT COUNT(*)::INT INTO _n FROM public.email_outbox
+   WHERE kind = 'payout_sent';
+  PERFORM pg_temp.check_eq('18g re-queueing the same payout adds nothing', _n, 1);
+
+  -- And the body names the bank account, which is the whole point of the
+  -- message — "your earnings were sent" with no destination is not an
+  -- answer to the question a creator is actually asking.
+  SELECT body_text INTO _r FROM public.email_outbox WHERE kind = 'payout_sent' LIMIT 1;
+  PERFORM pg_temp.check('18h the email names where the money went',
+                        _r.body_text LIKE '%account%', '');
+
+  -- ══ 19. A social sign-up can say what kind of account it is ══════
+  -- handle_new_user() defaults every OAuth sign-up to 'creator' because
+  -- the provider sends no user_type, and guard_profile_privileges then
+  -- refuses to change it. A brand signing in with Google was stuck.
+  -- claim_account_role is the one audited way out, and its whole safety
+  -- rests on the preconditions below.
+  INSERT INTO auth.users (id, instance_id, aud, role, email, encrypted_password,
+                          created_at, updated_at, raw_app_meta_data, raw_user_meta_data)
+  VALUES (_fresh, '00000000-0000-0000-0000-000000000000', 'authenticated',
+          'authenticated', 'test-fresh-' || _fresh || '@covo.test', '',
+          NOW(), NOW(), '{}', '{}');
+
+  -- The trigger made it a creator, exactly as it does for a real OAuth
+  -- sign-up: no user_type in the metadata to go on.
+  SELECT role INTO _r FROM public.profiles WHERE id = _fresh;
+  PERFORM pg_temp.check('19a a metadata-less signup defaults to creator',
+                        _r.role = 'creator', COALESCE(_r.role, 'NULL'));
+
+  -- claim_account_role reads auth.uid(), so become that account.
+  PERFORM set_config('request.jwt.claims',
+    json_build_object('sub', _fresh, 'role', 'authenticated')::text, true);
+
+  SELECT * INTO _r FROM public.my_role_claim_status();
+  PERFORM pg_temp.check('19b an untouched account may still choose',
+                        _r.claimable, COALESCE(_r.reason, ''));
+
+  SELECT * INTO _r FROM public.claim_account_role('brand');
+  PERFORM pg_temp.check('19c it can become a brand', _r.claimed, COALESCE(_r.outcome, ''));
+
+  SELECT role INTO _r FROM public.profiles WHERE id = _fresh;
+  PERFORM pg_temp.check('19d the role actually changed', _r.role = 'brand',
+                        COALESCE(_r.role, 'NULL'));
+
+  -- Once only. Without this the function is a role switch, not a claim.
+  SELECT * INTO _r FROM public.claim_account_role('creator');
+  PERFORM pg_temp.check('19e a second claim is refused', NOT _r.claimed,
+                        COALESCE(_r.outcome, ''));
+
+  SELECT role INTO _r FROM public.profiles WHERE id = _fresh;
+  PERFORM pg_temp.check('19f and the role is unchanged by it',
+                        _r.role = 'brand', COALESCE(_r.role, 'NULL'));
+
+  -- Asking for what it already is must be harmless: the OAuth callback
+  -- cannot cheaply tell whether it needs to act, so it may ask twice.
+  SELECT * INTO _r FROM public.claim_account_role('brand');
+  PERFORM pg_temp.check('19g re-claiming the same role is a no-op success',
+                        _r.claimed, COALESCE(_r.outcome, ''));
+
+  -- Escalation is the thing this must never allow.
+  BEGIN
+    PERFORM public.claim_account_role('admin');
+    PERFORM pg_temp.check('19h admin cannot be claimed', false, 'it was allowed');
+  EXCEPTION WHEN OTHERS THEN
+    PERFORM pg_temp.check('19h admin cannot be claimed', true, '');
+  END;
+
+  -- And an account with real history cannot be reassigned. _creator has
+  -- commissions and a payout against it by now.
+  PERFORM set_config('request.jwt.claims',
+    json_build_object('sub', _creator, 'role', 'authenticated')::text, true);
+
+  PERFORM pg_temp.check('19i an account with activity reads as busy',
+                        public.account_has_activity(_creator), '');
+
+  SELECT * INTO _r FROM public.my_role_claim_status();
+  PERFORM pg_temp.check('19j and may not choose', NOT _r.claimable,
+                        COALESCE(_r.reason, ''));
+
+  PERFORM set_config('request.jwt.claims', NULL, true);
 
 EXCEPTION WHEN OTHERS THEN
   INSERT INTO _results VALUES ('FIXTURE OR TEST CRASHED', false, SQLERRM);

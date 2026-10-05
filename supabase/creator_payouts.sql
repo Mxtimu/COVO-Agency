@@ -9,6 +9,22 @@
 -- Idempotent: safe to re-run.
 -- ════════════════════════════════════════════════════════════════════
 
+-- ── The payout minimum, defined once ────────────────────────────────
+-- R250 used to be a literal in three places: here, admin_create_payout
+-- and src/lib/api/creator.ts. Three copies of one number is a number
+-- that eventually disagrees with itself — a creator told R200 by the
+-- dashboard and refused at R249 by the database. It is now R200, per the
+-- payout cycle spec, and lives here because this is the earliest file
+-- that needs it. The frontend constant is checked against it by
+-- test_money_paths.sql.
+CREATE OR REPLACE FUNCTION public.min_payout()
+RETURNS NUMERIC
+LANGUAGE sql IMMUTABLE
+AS $minfn$ SELECT 200::NUMERIC; $minfn$;
+
+GRANT EXECUTE ON FUNCTION public.min_payout() TO anon, authenticated, service_role;
+
+
 CREATE OR REPLACE FUNCTION public.request_creator_payout()
 RETURNS TABLE (payout_id UUID, amount NUMERIC, commission_count INT)
 LANGUAGE plpgsql
@@ -16,7 +32,7 @@ SECURITY DEFINER SET search_path = public
 AS $$
 DECLARE
   _creator   UUID := auth.uid();
-  _min       NUMERIC := 250;
+  _min       NUMERIC := public.min_payout();
   _available NUMERIC;
   _ids       UUID[];
   _payout    UUID;

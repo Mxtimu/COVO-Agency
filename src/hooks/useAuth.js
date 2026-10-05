@@ -60,5 +60,14 @@ export function useAuth() {
     setLoading(false)
   }
 
-  return { session, profile, loading }
+  // Re-reads the profile for the signed-in user. Needed after something
+  // changes a profile column the router decides on — claim_account_role
+  // changes `role`, and without a refresh the guards keep routing on the
+  // old one until a full reload.
+  async function refreshProfile() {
+    const { data: { session: current } } = await supabase.auth.getSession()
+    if (current) await fetchProfile(current.user.id)
+  }
+
+  return { session, profile, loading, refreshProfile }
 }

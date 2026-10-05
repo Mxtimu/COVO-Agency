@@ -6,7 +6,14 @@ type Payout     = Database['public']['Tables']['payouts']['Row']
 
 // Minimum confirmed balance before a creator may request a withdrawal. Keeps
 // payout fees proportionate to the amount being moved.
-export const MIN_PAYOUT = 250
+//
+// The database is the authority here: public.min_payout() in
+// creator_payouts.sql. This copy exists so the UI can explain the rule
+// without a round trip, and test_money_paths.sql asserts the two agree —
+// because the failure mode of a stale copy is silent and nasty, a
+// dashboard that invites a creator to withdraw R220 and a database that
+// then refuses it with no explanation they can act on.
+export const MIN_PAYOUT = 200
 
 // Paystack transfers are wired: a creator registers a bank account, which
 // Paystack verifies and returns a recipient for, and an admin sends the

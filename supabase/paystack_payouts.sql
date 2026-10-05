@@ -153,42 +153,13 @@ REVOKE EXECUTE ON FUNCTION public.release_payout_claim(UUID, TEXT) FROM PUBLIC, 
 GRANT  EXECUTE ON FUNCTION public.release_payout_claim(UUID, TEXT) TO service_role;
 
 
--- ── What a creator needs before they can be paid ─────────────────────
-CREATE OR REPLACE FUNCTION public.payout_readiness(p_creator UUID)
-RETURNS TABLE (
-  has_recipient   BOOLEAN,
-  bank_name       TEXT,
-  account_name    TEXT,
-  account_last4   TEXT,
-  confirmed_total NUMERIC,
-  meets_minimum   BOOLEAN
-)
-LANGUAGE plpgsql
-SECURITY DEFINER SET search_path = public
-STABLE
-AS $fn$
-BEGIN
-  IF NOT (p_creator = auth.uid() OR public.is_admin()) THEN
-    RAISE EXCEPTION 'Not authorised to view this'
-      USING ERRCODE = 'insufficient_privilege';
-  END IF;
-
-  RETURN QUERY
-  SELECT (cp.paystack_recipient_code IS NOT NULL),
-         cp.bank_name,
-         cp.bank_account_name,
-         cp.bank_account_last4,
-         COALESCE(t.total, 0),
-         COALESCE(t.total, 0) >= 250
-  FROM public.creator_profiles cp
-  LEFT JOIN LATERAL (
-    SELECT SUM(c.net_commission) AS total
-    FROM public.commissions c
-    WHERE c.creator_id = p_creator AND c.status = 'confirmed'
-  ) t ON true
-  WHERE cp.id = p_creator;
-END;
-$fn$;
-
-REVOKE EXECUTE ON FUNCTION public.payout_readiness(UUID) FROM PUBLIC, anon;
-GRANT  EXECUTE ON FUNCTION public.payout_readiness(UUID) TO authenticated, service_role;
+-- ── payout_readiness lives in creator_identity.sql ───────────────────
+-- It used to be defined here too, with six output columns, an is_admin()
+-- gate and its own hardcoded R250. creator_identity.sql then DROPs and
+-- recreates it with nine columns, so this copy never survived a full run
+-- — it was only ever reachable by running this file again afterwards,
+-- which would have quietly restored the R250 and a gate that throws for
+-- pg_cron.
+--
+-- That is exactly how abandon_payout ended up with two bodies and a run
+-- order that reinstated the broken one. One definition, one file.

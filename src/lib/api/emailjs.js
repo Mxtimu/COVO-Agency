@@ -10,7 +10,9 @@ const PUBLIC_KEY  = import.meta.env.VITE_EMAILJS_PUBLIC_KEY
 // way to send a working link — branding these emails means configuring custom
 // SMTP under Authentication → Emails, not sending a second message here.
 export async function sendPasswordReset(email) {
-  const redirectTo = `${window.location.origin}/auth/callback?type=recovery`
+  // Straight to the screen that sets the password. It used to point at
+  // /auth/callback, which had no idea what recovery was.
+  const redirectTo = `${window.location.origin}/auth/reset`
   const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo })
   return { error }
 }
