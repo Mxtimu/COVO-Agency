@@ -6,6 +6,7 @@ import BrandCampaigns from '../components/brand/BrandCampaigns'
 import BrandCreators  from '../components/brand/BrandCreators'
 import BrandPayments  from '../components/brand/BrandPayments'
 import BrandProfile   from '../components/brand/BrandProfile'
+import Disputes       from '../components/shared/Disputes'
 import Icon           from '../components/ui/Icon'
 
 const PANELS = [
@@ -13,6 +14,7 @@ const PANELS = [
   { id: 'campaigns',  icon: 'campaigns', label: 'Campaigns' },
   { id: 'creators',   icon: 'creators',  label: 'Creators'  },
   { id: 'payments',   icon: 'payments',  label: 'Payments'  },
+  { id: 'disputes',   icon: 'disputes',  label: 'Reports'   },
   { id: 'profile',    icon: 'brands',    label: 'Profile'   },
 ]
 
@@ -81,6 +83,7 @@ export default function BrandDashboard() {
           {active === 'campaigns' && <BrandCampaigns />}
           {active === 'creators'  && <BrandCreators  />}
           {active === 'payments'  && <BrandPayments  />}
+          {active === 'disputes'  && <Disputes       audience="brand" />}
           {active === 'profile'   && <BrandProfile   />}
         </div>
       </div>

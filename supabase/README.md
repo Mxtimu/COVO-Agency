@@ -43,6 +43,7 @@ and the other became a no-op, which is how `commissions` ended up without the
 | 25 | `payout_batch.sql` | The monthly payout cycle, R200 minimum with rollover, and the payout/low-balance emails. **Needs 24, and needs 8 re-run first** — `creator_payout_standing` is `LANGUAGE sql`, so Postgres resolves `min_payout()` when the function is *created*, not when it is called, and the file will not install without it |
 | 26 | `free_tier_guardrails.sql` | Free plan: one campaign, 25 creators, 30 days. **Needs 23 and 24** — it replaces `campaign_accepts_new_creators` and sends mail |
 | 27 | `role_claim.sql` | Lets a social sign-up say whether it is a creator or a brand. Without it every OAuth sign-up is a creator, permanently |
+| 28 | `waitlist_launch.sql` | The one launch email the public site promises. **Needs 24** (`email_outbox`) |
 | — | `verify_checks.sql` | **Run this after any change.** Every check as one result set. |
 | — | `verify_hardening.sql` | Runtime proof the guards reject a browser write. Rolls itself back. |
 | — | `test_money_paths.sql` | 44 assertions over the plpgsql that moves money. Rolls itself back. |

@@ -1,0 +1,354 @@
+<!doctype html>
+<html lang="en-ZA">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>COVO — Creators who sell, not just post</title>
+<meta name="description" content="COVO connects South African brands with creators who drive real sales. Brands fund campaigns upfront, creators earn commission on every confirmed order, and payouts land in your own bank account. Launching soon — join the waitlist.">
+
+<meta property="og:title" content="COVO — Creators who sell, not just post">
+<meta property="og:description" content="South African creator partnerships, paid on results. Launching soon.">
+<meta property="og:type" content="website">
+<meta name="theme-color" content="#111C19">
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700&family=Noto+Serif+Display:ital,wght@0,400;0,600;1,400&display=swap" rel="stylesheet">
+
+<style>
+  :root{
+    --sage:#C3CE94; --sage-dark:#a8b47a; --lilac:#D2B8F2;
+    --tan:#C1B7AA; --warm-white:#EDE8DF;
+    --ink:#1C2C28; --ink-deep:#111C19; --ink-mid:#243530;
+    --border:rgba(193,183,170,.14);
+    --font-serif:'Noto Serif Display',Georgia,serif;
+    --font-sans:'Montserrat','Helvetica Neue',Arial,sans-serif;
+    --gutter:1.25rem;
+    --maxw:60rem;
+  }
+  *,*::before,*::after{box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%}
+  body{
+    margin:0; background:var(--ink-deep); color:var(--warm-white);
+    font-family:var(--font-sans); font-size:16px; line-height:1.6;
+    -webkit-font-smoothing:antialiased; overflow-x:hidden;
+  }
+  .wrap{max-width:var(--maxw); margin:0 auto; padding:0 var(--gutter)}
+  h1,h2,h3{font-family:var(--font-serif); font-weight:600; line-height:1.18; margin:0}
+  p{margin:0}
+  a{color:var(--sage)}
+
+  /* ── Header ───────────────────────────────────────────────── */
+  header{padding:1.5rem 0}
+  .logo{
+    font-family:var(--font-serif); font-size:1.35rem; letter-spacing:.14em;
+    font-weight:600; color:var(--warm-white);
+  }
+  .logo span{color:var(--sage)}
+
+  /* ── Hero ─────────────────────────────────────────────────── */
+  .hero{padding:3rem 0 3.5rem}
+  .eyebrow{
+    display:inline-block; font-size:.72rem; letter-spacing:.16em;
+    text-transform:uppercase; color:var(--sage); font-weight:600;
+    border:1px solid rgba(195,206,148,.3); border-radius:999px;
+    padding:.35rem .8rem; margin-bottom:1.5rem;
+  }
+  .hero h1{font-size:clamp(2.1rem,7vw,3.6rem); max-width:22em}
+  .hero h1 em{font-style:italic; color:var(--sage)}
+  .lede{
+    margin-top:1.25rem; font-size:clamp(1rem,2.4vw,1.15rem);
+    color:var(--tan); max-width:34em;
+  }
+
+  /* ── Waitlist form ────────────────────────────────────────── */
+  .signup{margin-top:2.25rem; max-width:30rem}
+  .roles{display:flex; gap:.5rem; margin-bottom:.7rem}
+  .roles button{
+    flex:1; padding:.6rem .5rem; border-radius:10px; cursor:pointer;
+    background:transparent; border:1px solid var(--border);
+    color:var(--tan); font-family:var(--font-sans); font-size:.85rem;
+    font-weight:500; transition:border-color .15s,color .15s,background .15s;
+  }
+  .roles button[aria-pressed="true"]{
+    border-color:var(--sage); color:var(--ink-deep); background:var(--sage); font-weight:600;
+  }
+  .row{display:flex; gap:.5rem; flex-wrap:wrap}
+  .row input{
+    flex:1 1 14rem; min-width:0; padding:.8rem .9rem; border-radius:10px;
+    background:var(--ink-mid); border:1px solid var(--border);
+    color:var(--warm-white); font-family:var(--font-sans); font-size:1rem;
+  }
+  .row input::placeholder{color:rgba(193,183,170,.6)}
+  .row input:focus-visible{outline:2px solid var(--sage); outline-offset:1px}
+  .row button[type=submit]{
+    flex:0 0 auto; padding:.8rem 1.4rem; border-radius:10px; border:0;
+    background:var(--sage); color:var(--ink-deep); font-family:var(--font-sans);
+    font-size:.95rem; font-weight:700; cursor:pointer; transition:background .15s;
+  }
+  .row button[type=submit]:hover:not(:disabled){background:var(--sage-dark)}
+  .row button[type=submit]:disabled{opacity:.6; cursor:default}
+  /* Hidden from people, inviting to bots. Not display:none — some bots skip
+     those. Kept out of the tab order and off the accessibility tree. */
+  .trap{position:absolute; left:-9999px; width:1px; height:1px; overflow:hidden}
+  .note{margin-top:.7rem; font-size:.8rem; color:var(--tan)}
+  .msg{margin-top:.8rem; font-size:.9rem; padding:.7rem .85rem; border-radius:9px}
+  .msg.ok{background:rgba(195,206,148,.12); color:var(--sage); border:1px solid rgba(195,206,148,.3)}
+  .msg.bad{background:rgba(239,68,68,.1); color:#FCA5A5; border:1px solid rgba(239,68,68,.25)}
+
+  /* ── Sections ─────────────────────────────────────────────── */
+  section.band{border-top:1px solid var(--border); padding:3.25rem 0}
+  .kicker{
+    font-size:.72rem; letter-spacing:.16em; text-transform:uppercase;
+    color:var(--sage); font-weight:600; margin-bottom:.8rem;
+  }
+  section.band h2{font-size:clamp(1.5rem,4vw,2.1rem); max-width:24em}
+  .sub{margin-top:.8rem; color:var(--tan); max-width:36em}
+
+  .steps{display:grid; gap:1.25rem; margin-top:2rem}
+  @media(min-width:48rem){.steps{grid-template-columns:repeat(3,1fr); gap:1.75rem}}
+  .step{border-top:2px solid var(--sage); padding-top:1rem}
+  .step .n{
+    font-family:var(--font-serif); font-size:.85rem; color:var(--sage);
+    letter-spacing:.1em; margin-bottom:.4rem;
+  }
+  .step h3{font-size:1.05rem; margin-bottom:.4rem}
+  .step p{color:var(--tan); font-size:.92rem}
+
+  .cols{display:grid; gap:1.25rem; margin-top:2rem}
+  @media(min-width:48rem){.cols{grid-template-columns:1fr 1fr; gap:1.5rem}}
+  .card{
+    background:var(--ink); border:1px solid var(--border);
+    border-radius:14px; padding:1.5rem;
+  }
+  .card h3{font-size:1.15rem; margin-bottom:.9rem}
+  .card ul{margin:0; padding-left:1.1rem; color:var(--tan); font-size:.92rem}
+  .card li{margin-bottom:.5rem}
+  .card li::marker{color:var(--sage)}
+
+  .trust{
+    margin-top:2rem; border-left:2px solid var(--lilac);
+    padding:.2rem 0 .2rem 1.25rem; max-width:40em;
+  }
+  .trust p{color:var(--tan); font-size:.95rem}
+  .trust strong{color:var(--warm-white); font-weight:600}
+
+  footer{
+    border-top:1px solid var(--border); padding:2.25rem 0 3rem;
+    color:var(--tan); font-size:.82rem;
+  }
+  footer .fr{display:flex; gap:1.25rem; flex-wrap:wrap; align-items:center; justify-content:space-between}
+
+  @media(prefers-reduced-motion:no-preference){
+    .reveal{opacity:0; transform:translateY(10px); transition:opacity .5s ease, transform .5s ease}
+    .reveal.in{opacity:1; transform:none}
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap"><div class="logo">C<span>O</span>VO</div></div>
+</header>
+
+<main>
+  <div class="wrap hero">
+    <span class="eyebrow">Launching soon · South Africa</span>
+    <h1>Creators who <em>sell</em>, not just post.</h1>
+    <p class="lede">
+      COVO pays South African creators for the sales they actually drive — not for
+      reach, not for impressions. Brands fund a campaign before it starts, so the
+      money is already there when you post.
+    </p>
+
+    <form class="signup" id="form" novalidate>
+      <div class="roles" role="group" aria-label="I am a">
+        <button type="button" id="r-creator" aria-pressed="true">I'm a creator</button>
+        <button type="button" id="r-brand"   aria-pressed="false">I'm a brand</button>
+      </div>
+      <div class="row">
+        <label for="email" class="trap">Email address</label>
+        <input id="email" name="email" type="email" inputmode="email"
+               autocomplete="email" placeholder="you@email.com" required>
+        <button type="submit" id="go">Join the waitlist</button>
+      </div>
+      <div class="trap">
+        <label for="company">Company</label>
+        <input id="company" name="company" type="text" tabindex="-1" autocomplete="off" aria-hidden="true">
+      </div>
+      <p class="note">One email when we launch. Nothing else, and no sharing your address.</p>
+      <div id="msg" role="status" aria-live="polite"></div>
+    </form>
+  </div>
+
+  <section class="band reveal">
+    <div class="wrap">
+      <p class="kicker">How it works</p>
+      <h2>Three steps, and the money is accounted for at every one.</h2>
+      <div class="steps">
+        <div class="step">
+          <div class="n">01</div>
+          <h3>A brand funds a campaign</h3>
+          <p>The brand sets a commission rate and deposits the budget up front. It
+             sits in a campaign balance before a single creator is invited.</p>
+        </div>
+        <div class="step">
+          <div class="n">02</div>
+          <h3>Creators share a tracked link</h3>
+          <p>Approved creators get their own link for each product. Every click is
+             counted once, and every order that comes from it is matched back.</p>
+        </div>
+        <div class="step">
+          <div class="n">03</div>
+          <h3>Earnings are paid out</h3>
+          <p>Commission is calculated on the order, held through the brand's return
+             window, then paid into your own South African bank account.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="band reveal">
+    <div class="wrap">
+      <p class="kicker">Who it's for</p>
+      <h2>Built for both sides of the deal.</h2>
+      <div class="cols">
+        <div class="card">
+          <h3>For creators</h3>
+          <ul>
+            <li>Earn a percentage of every confirmed sale you drive.</li>
+            <li>See your clicks, conversions and earnings as they happen.</li>
+            <li>Paid into your own bank account, in rands.</li>
+            <li>No minimum follower count — your results speak.</li>
+          </ul>
+        </div>
+        <div class="card">
+          <h3>For brands</h3>
+          <ul>
+            <li>Pay for sales, not for reach or guesswork.</li>
+            <li>Connect your store and orders are attributed automatically.</li>
+            <li>Set your own commission rate and return window.</li>
+            <li>See exactly which creator drove which order.</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="trust">
+        <p><strong>Why the money is held first.</strong> Affiliate programmes usually ask
+           creators to do the work and trust that payment arrives. COVO turns that
+           around: a brand's budget is deposited before creators are invited, and a
+           campaign cannot promise more commission than it holds. If the balance runs
+           short, earnings are recorded and paid as soon as it is topped up — never
+           quietly dropped.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="band reveal">
+    <div class="wrap">
+      <p class="kicker">Early access</p>
+      <h2>We're onboarding the first brands and creators now.</h2>
+      <p class="sub">
+        Leave your email and we'll send you one message the day it opens. If you're a
+        brand and you'd like to be in the first group, say so when we reply.
+      </p>
+      <p class="sub" style="margin-top:1.25rem">
+        <a href="#form">Join the waitlist &uarr;</a>
+      </p>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap fr">
+    <span>&copy; <span id="yr">2026</span> COVO. Cape Town, South Africa.</span>
+    <span><a href="mailto:hello@covo.africa">hello@covo.africa</a></span>
+  </div>
+</footer>
+
+<script>
+(function () {
+  var form = document.getElementById('form');
+  var email = document.getElementById('email');
+  var trap = document.getElementById('company');
+  var go = document.getElementById('go');
+  var msg = document.getElementById('msg');
+  var rC = document.getElementById('r-creator');
+  var rB = document.getElementById('r-brand');
+  var role = 'creator';
+
+  document.getElementById('yr').textContent = new Date().getFullYear();
+
+  function pick(which) {
+    role = which;
+    rC.setAttribute('aria-pressed', String(which === 'creator'));
+    rB.setAttribute('aria-pressed', String(which === 'brand'));
+  }
+  rC.addEventListener('click', function () { pick('creator'); });
+  rB.addEventListener('click', function () { pick('brand'); });
+
+  function say(text, kind) {
+    msg.className = 'msg ' + kind;
+    msg.textContent = text;
+  }
+
+  form.addEventListener('submit', function (e) {
+    e.preventDefault();
+    var address = email.value.trim();
+
+    // Matches the server check. Validating here too only saves a round trip —
+    // the server decides, because this script is trivially bypassed.
+    if (address.length < 5 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(address)) {
+      say('Please enter a valid email address.', 'bad');
+      email.focus();
+      return;
+    }
+
+    go.disabled = true;
+    go.textContent = 'Joining…';
+    msg.className = '';
+    msg.textContent = '';
+
+    fetch('/api/waitlist', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: address, role: role, company: trap.value })
+    })
+      .then(function (res) { return res.json().catch(function () { return {}; }); })
+      .then(function (data) {
+        if (data && data.ok) {
+          form.querySelector('.row').style.display = 'none';
+          form.querySelector('.roles').style.display = 'none';
+          say(data.already
+            ? "You're already on the list — we'll be in touch the day we launch."
+            : "You're on the list. We'll email you the day COVO opens.", 'ok');
+          return;
+        }
+        go.disabled = false;
+        go.textContent = 'Join the waitlist';
+        say((data && data.error) || 'Something went wrong. Please try again.', 'bad');
+      })
+      .catch(function () {
+        go.disabled = false;
+        go.textContent = 'Join the waitlist';
+        say("Couldn't reach us just now. Check your connection and try again.", 'bad');
+      });
+  });
+
+  // Progressive reveal, skipped entirely when the viewer prefers less motion
+  // or the browser is too old for IntersectionObserver.
+  if ('IntersectionObserver' in window &&
+      !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    var io = new IntersectionObserver(function (entries) {
+      entries.forEach(function (en) {
+        if (en.isIntersecting) { en.target.classList.add('in'); io.unobserve(en.target); }
+      });
+    }, { rootMargin: '0px 0px -10% 0px' });
+    document.querySelectorAll('.reveal').forEach(function (el) { io.observe(el); });
+  } else {
+    document.querySelectorAll('.reveal').forEach(function (el) { el.classList.add('in'); });
+  }
+})();
+</script>
+</body>
+</html>

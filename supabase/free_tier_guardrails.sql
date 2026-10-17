@@ -226,7 +226,17 @@ AS $fn$
     SELECT 1
     FROM public.campaigns c
     JOIN public.campaign_escrow e ON e.campaign_id = c.id
-    JOIN public.brand_profiles bp ON bp.id = c.brand_id
+    -- LEFT, not inner. brand_profiles rows are created lazily by onboarding,
+    -- not by the signup trigger, so a brand can own a campaign before the
+    -- row exists. An inner join does not give such a brand a NULL plan_tier
+    -- for the COALESCE to catch — it drops the campaign from the result
+    -- entirely, EXISTS returns false, and a fully funded campaign refuses
+    -- every new creator for a reason nobody can see.
+    --
+    -- test_money_paths.sql 13d caught this: campaign_capacity() below
+    -- already LEFT JOINs, so the two functions answering the same question
+    -- disagreed, one reporting the campaign open while the gate refused it.
+    LEFT JOIN public.brand_profiles bp ON bp.id = c.brand_id
     CROSS JOIN LATERAL public.plan_limits(COALESCE(bp.plan_tier, 'free')) lim
     WHERE c.id = p_campaign_id
       AND c.status = 'active'

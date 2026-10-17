@@ -76,21 +76,34 @@ serve(async (req) => {
     // R0 behind it minted a link and sent the welcome email, and every sale
     // the creator then made landed as 'held'. They would have been promoting
     // for a promise COVO could not keep, having been told nothing.
-    const { data: acceptsNew, error: gateError } = await supabase
-      .rpc('campaign_accepts_new_creators', { p_campaign_id: campaign_id })
+    // campaign_capacity rather than campaign_accepts_new_creators: it
+    // answers the same question AND returns the reason, so the admin is
+    // told what is actually wrong.
+    //
+    // This used to guess — it reported "below its R500 funding floor"
+    // whenever the status was 'active', which is only one of five reasons
+    // the gate can refuse. A funded campaign that had simply filled its 25
+    // free-plan creator slots would have sent someone off to top up an
+    // escrow that was never the problem.
+    const { data: capacity, error: gateError } = await supabase
+      .rpc('campaign_capacity', { p_campaign_id: campaign_id })
 
     if (gateError) {
-      console.error('[generate-affiliate-assets] gate check failed', gateError)
-      return json({ error: 'Could not confirm the campaign is funded. Nothing was approved.' }, 500)
+      console.error('[generate-affiliate-assets] capacity check failed', gateError)
+      return json({ error: 'Could not confirm the campaign can take another creator. Nothing was approved.' }, 500)
     }
 
-    if (acceptsNew === false) {
+    // RETURNS TABLE comes back as an array of one row.
+    const cap = Array.isArray(capacity) ? capacity[0] : capacity
+
+    if (cap && cap.accepts_new === false) {
       return json({
-        error: `"${campaign.title}" is not accepting new creators right now — it is `
-             + `${campaign.status === 'active' ? 'below its R500 funding floor' : campaign.status}. `
-             + `Ask the brand to top up the campaign, then approve this creator again. `
-             + `Creators already on the campaign keep earning in the meantime.`,
+        error: `"${campaign.title}" is not accepting new creators right now. `
+             + `${cap.reason ?? 'The campaign is not currently open to new creators.'} `
+             + `Creators already on it keep earning in the meantime.`,
         reason: 'campaign_not_accepting',
+        creators_used: cap.creators_used,
+        max_creators: cap.max_creators,
       }, 409)
     }
     if (!creator)  return json({ error: 'Creator not found' }, 404)

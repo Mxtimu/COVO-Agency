@@ -7,6 +7,7 @@ import Storefront  from '../components/dashboard/Storefront'
 import Links       from '../components/dashboard/Links'
 import Earnings    from '../components/dashboard/Earnings'
 import DashProfile from '../components/dashboard/DashProfile'
+import Disputes    from '../components/shared/Disputes'
 import Icon        from '../components/ui/Icon'
 import { fetchCreatorStats, formatZAR } from '../lib/api/creator'
 
@@ -16,6 +17,7 @@ const PANELS = [
   { id: 'storefront', icon: 'storefront', label: 'Storefront' },
   { id: 'links',      icon: 'links',      label: 'My Links'   },
   { id: 'earnings',   icon: 'earnings',   label: 'Earnings'   },
+  { id: 'disputes',   icon: 'disputes',   label: 'Reports'    },
 ]
 
 const TITLES = { overview: 'Overview', campaigns: 'Campaigns', storefront: 'Storefront', links: 'My Links', earnings: 'Earnings', profile: 'Profile' }
@@ -130,6 +132,7 @@ export default function Dashboard() {
           {active === 'storefront' && <Storefront showToast={showToast} showPanel={setActive} />}
           {active === 'links'      && <Links      showToast={showToast} showPanel={setActive} />}
           {active === 'earnings'   && <Earnings   showToast={showToast} />}
+          {active === 'disputes'   && <Disputes   audience="creator" />}
           {active === 'profile'    && <DashProfile user={user} profile={profile} />}
         </div>
       </div>
