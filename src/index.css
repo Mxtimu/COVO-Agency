@@ -403,6 +403,12 @@ body {
 }
 .cov-split--forest { background: #182820; }
 .cov-split--flip .cov-split__visual { order: -1; }
+/* One column, for a split section with no visual beside the text. The
+   brands section lost its stat card — the figures on it (average ROI, time
+   to first match, satisfaction rating) were invented, and a product that has
+   not launched cannot report results it has never measured. Without this the
+   grid still reserves the second column and leaves half the section blank. */
+.cov-split--single { grid-template-columns: 1fr; }
 
 .cov-split__text {
   display: flex; flex-direction: column; gap: 2rem;

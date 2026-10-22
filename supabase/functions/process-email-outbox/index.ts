@@ -8,15 +8,14 @@
 // flips them to 'sending' in the same statement that returns them — so
 // two overlapping runs cannot send the same message twice.
 //
-// Deploy with --no-verify-jwt and keep CRON_SECRET set: the platform's
-// JWT gate accepts the anon key, which every browser has, so the real
-// authorisation is the shared secret checked below.
+// Deploy with --no-verify-jwt. The platform's JWT gate accepts the anon
+// key, which every browser has, so it proves nothing; the real
+// authorisation is the single-use ticket redeemed below.
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
 const SERVICE_KEY  = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
 const RESEND_KEY   = Deno.env.get('RESEND_API_KEY')
-const CRON_SECRET  = Deno.env.get('CRON_SECRET')
 const FROM         = Deno.env.get('EMAIL_FROM') ?? 'COVO <onboarding@resend.dev>'
 
 // How many to send per invocation. Resend's free tier allows 2 requests
@@ -29,24 +28,37 @@ Deno.serve(async (req) => {
     return json({ error: 'Method not allowed' }, 405)
   }
 
-  // A missing CRON_SECRET must fail closed. Treating "unset" as "open"
-  // would leave a function that sends mail callable by anyone holding
-  // the anon key, which is published in the frontend bundle.
-  if (!CRON_SECRET) {
-    console.error('[email-outbox] CRON_SECRET is not set; refusing to run')
-    return json({ error: 'Not configured' }, 500)
-  }
-
-  if (req.headers.get('x-cron-secret') !== CRON_SECRET) {
-    return json({ error: 'Unauthorized' }, 401)
-  }
-
   if (!RESEND_KEY) {
     console.error('[email-outbox] RESEND_API_KEY is not set; nothing claimed')
     return json({ error: 'Email is not configured' }, 500)
   }
 
   const supabase = createClient(SUPABASE_URL, SERVICE_KEY)
+
+  // Authorisation is a single-use ticket the database minted, not a
+  // shared secret. This replaced a CRON_SECRET env var that had to match
+  // a Vault entry by hand; the two drifted three times in a row and the
+  // only symptom was mail quietly never sending.
+  //
+  // Holding an unused ticket is the proof: public.worker_tickets has RLS
+  // on and no policies, so only service-role write access could have
+  // created one, and the anon key in the frontend bundle cannot. Redeem
+  // is atomic and single-use, so a captured ticket is worth one call
+  // within five minutes rather than forever.
+  const ticket = req.headers.get('x-worker-ticket') ?? ''
+
+  const { data: redeemed, error: ticketError } = await supabase
+    .rpc('redeem_worker_ticket', { p_token: ticket, p_purpose: 'email_outbox' })
+
+  if (ticketError) {
+    // Fail closed: an unverifiable caller is not an authorised one.
+    console.error('[email-outbox] could not redeem ticket', ticketError)
+    return json({ error: 'Unauthorized' }, 401)
+  }
+
+  if (redeemed !== true) {
+    return json({ error: 'Unauthorized' }, 401)
+  }
 
   const { data: queued, error } = await supabase
     .rpc('claim_emails_to_send', { p_limit: BATCH })

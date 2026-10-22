@@ -1,0 +1,18 @@
+# Cloudflare Pages response headers for the public site.
+#
+# There is deliberately no Content-Security-Policy here. The page loads Google
+# Fonts and talks to Supabase, and a CSP written without testing against the
+# real built bundle is the fastest way to ship a blank white page. Worth adding
+# once there is somewhere to test it that is not the live domain.
+#
+# Vercel ignores this file, so it is inert in the app build.
+/*
+  X-Frame-Options: DENY
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+  Permissions-Policy: geolocation=(), microphone=(), camera=(), payment=()
+  Strict-Transport-Security: max-age=31536000; includeSubDomains
+
+# Hashed filenames, so they can be cached hard and forever.
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable

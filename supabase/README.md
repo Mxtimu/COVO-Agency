@@ -44,6 +44,9 @@ and the other became a no-op, which is how `commissions` ended up without the
 | 26 | `free_tier_guardrails.sql` | Free plan: one campaign, 25 creators, 30 days. **Needs 23 and 24** — it replaces `campaign_accepts_new_creators` and sends mail |
 | 27 | `role_claim.sql` | Lets a social sign-up say whether it is a creator or a brand. Without it every OAuth sign-up is a creator, permanently |
 | 28 | `waitlist_launch.sql` | The one launch email the public site promises. **Needs 24** (`email_outbox`) |
+| 29 | `waitlist_welcome.sql` | Queues a "you're on the list" confirmation on signup. **Needs 24**. Optional — nothing sends until Resend has a verified domain |
+| 30 | `email_worker_schedule.sql` | **Without this nothing ever sends.** pg_cron + pg_net poke `process-email-outbox` every 5 min. **Needs 24** and a `covo_cron_secret` in Vault |
+| 31 | `worker_tickets.sql` | Replaces the CRON_SECRET/Vault pair with single-use tickets the database mints. **Needs 30.** Redeploy `process-email-outbox` after |
 | — | `verify_checks.sql` | **Run this after any change.** Every check as one result set. |
 | — | `verify_hardening.sql` | Runtime proof the guards reject a browser write. Rolls itself back. |
 | — | `test_money_paths.sql` | 44 assertions over the plpgsql that moves money. Rolls itself back. |

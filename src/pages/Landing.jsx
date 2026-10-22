@@ -1,6 +1,59 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, createContext, useContext } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
+
+// ── Waitlist-only mode ────────────────────────────────────────────────
+//
+// joincovo.app serves this exact page, minus every way in. The product is
+// not open yet, so a "Get Started" button that lands on a signup form is a
+// promise COVO cannot keep — and a login screen on the public domain invites
+// people to hunt for an account they do not have.
+//
+// It is a build-time flag rather than a second copy of the page, because the
+// alternative is two landing pages drifting apart: a change to the hero copy
+// would have to be made twice and would eventually be made once.
+//
+//   npm run build          → the MVP on Vercel, every CTA goes to /auth
+//   npm run build:landing  → joincovo.app, every CTA goes to the waitlist
+const WAITLIST_ONLY = import.meta.env.VITE_WAITLIST_ONLY === 'true'
+
+// Which side the visitor said they were, shared between the join buttons and
+// the waitlist form. A context rather than props because the buttons sit
+// inside four different section components and the form is their sibling —
+// threading a setter down through all of them would be noise.
+const PickSideContext = createContext(() => {})
+
+// Every call to action on the page goes through this. In normal mode it is a
+// router link to /auth; in waitlist-only mode it scrolls to the waitlist
+// instead, keeping the same button, the same copy and the same layout.
+//
+// `side` is what the button claims about the visitor. In waitlist mode it
+// preselects brand or creator on the form below, so somebody who clicked
+// "Join as a Brand" is not asked the same question again two seconds later.
+// `waitlistLabel` is the honest version of the same button. "Join as a Brand"
+// promises an account that does not exist yet, so on the public site the label
+// says what actually happens. The MVP keeps `children` unchanged.
+function CTA({ to, side, waitlistLabel, className, style, onClick, children }) {
+  const pickSide = useContext(PickSideContext)
+
+  if (WAITLIST_ONLY) {
+    return (
+      <a
+        href="#waitlist"
+        className={className}
+        style={style}
+        onClick={(e) => { if (side) pickSide(side); onClick?.(e) }}
+      >
+        {waitlistLabel ?? children}
+      </a>
+    )
+  }
+  return (
+    <Link to={to} className={className} style={style} onClick={onClick}>
+      {children}
+    </Link>
+  )
+}
 
 /* ── NAV ── */
 function CovNav({ isLoggedIn, navigate }) {
@@ -25,7 +78,10 @@ function CovNav({ isLoggedIn, navigate }) {
           <li><a href="#how">How It Works</a></li>
         </ul>
         <div className="cov-nav__cta">
-          {isLoggedIn ? (
+          {WAITLIST_ONLY ? (
+            // No "Log in": there is nothing to log in to yet on this domain.
+            <a href="#waitlist" className="cov-btn cov-btn--sage">Join the waitlist</a>
+          ) : isLoggedIn ? (
             <button className="cov-btn cov-btn--sage" onClick={() => navigate('/dashboard')}>
               Dashboard
             </button>
@@ -53,7 +109,12 @@ function CovNav({ isLoggedIn, navigate }) {
           <li><a href="#how"      onClick={closeMenu}>How It Works</a></li>
         </ul>
         <div className="cov-mobile-menu__cta">
-          {isLoggedIn ? (
+          {WAITLIST_ONLY ? (
+            <a href="#waitlist" className="cov-btn cov-btn--sage cov-btn--lg"
+              style={{ width: '100%', justifyContent: 'center' }} onClick={closeMenu}>
+              Join the waitlist
+            </a>
+          ) : isLoggedIn ? (
             <button className="cov-btn cov-btn--sage cov-btn--lg" style={{ width: '100%' }}
               onClick={() => { navigate('/dashboard'); closeMenu() }}>
               Dashboard
@@ -95,12 +156,12 @@ function HeroSection() {
             Match<span className="cov-dot">.</span>
           </h1>
           <div className="cov-hero__actions">
-            <Link to="/auth?type=brand" className="cov-btn cov-btn--sage cov-btn--lg">
+            <CTA to="/auth?type=brand" side="brand" waitlistLabel="Join waitlist as a Brand" className="cov-btn cov-btn--sage cov-btn--lg">
               Join as a Brand
-            </Link>
-            <Link to="/auth?type=creator" className="cov-btn cov-btn--ghost cov-btn--lg">
+            </CTA>
+            <CTA to="/auth?type=creator" side="creator" waitlistLabel="Join waitlist as a Creator" className="cov-btn cov-btn--ghost cov-btn--lg">
               Join as a Creator ↗
-            </Link>
+            </CTA>
           </div>
         </div>
 
@@ -208,7 +269,7 @@ function ForBrandsSection() {
     { mark: '◆', title: 'ROI Clarity', body: 'Every affiliate link, every click, every conversion tracked and attributed so you know exactly what moved the needle.' },
   ]
   return (
-    <section className="cov-split" id="brands">
+    <section className="cov-split cov-split--single" id="brands">
       <div className="cov-split__text">
         <span className="cov-label">For Brands</span>
         <h2 className="cov-h2">Stop guessing.<br />Start converting.</h2>
@@ -228,31 +289,9 @@ function ForBrandsSection() {
             </div>
           ))}
         </div>
-        <Link to="/auth?type=brand" className="cov-btn cov-btn--sage cov-btn--lg">
-          Start as a Brand
-        </Link>
-      </div>
-      <div className="cov-split__visual">
-        <div className="cov-stat-card">
-          <span className="cov-stat-card__mark">◆</span>
-          <p className="cov-stat-card__num">3.2×</p>
-          <p className="cov-stat-card__label">Average ROI<br />across brand campaigns</p>
-          <div className="cov-stat-card__divider" />
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-            <div className="cov-stat-card__row">
-              <span className="cov-stat-card__row-num">48h</span>
-              <span className="cov-stat-card__row-label">Time to first creator match</span>
-            </div>
-            <div className="cov-stat-card__row">
-              <span className="cov-stat-card__row-num">95%</span>
-              <span className="cov-stat-card__row-label">Brand satisfaction rating</span>
-            </div>
-            <div className="cov-stat-card__row">
-              <span className="cov-stat-card__row-num">8–25%</span>
-              <span className="cov-stat-card__row-label">Commission range per campaign</span>
-            </div>
-          </div>
-        </div>
+        <CTA to="/auth?type=brand" side="brand" waitlistLabel="Join waitlist as a Brand" className="cov-btn cov-btn--sage cov-btn--lg">
+          Join as a Brand
+        </CTA>
       </div>
     </section>
   )
@@ -316,9 +355,9 @@ function ForCreatorsSection() {
             </div>
           ))}
         </div>
-        <Link to="/auth?type=creator" className="cov-btn cov-btn--brown cov-btn--lg">
-          Start Earning
-        </Link>
+        <CTA to="/auth?type=creator" side="creator" waitlistLabel="Join waitlist as a Creator" className="cov-btn cov-btn--brown cov-btn--lg">
+          Join as a Creator
+        </CTA>
       </div>
     </section>
   )
@@ -352,7 +391,7 @@ function HowItWorksSection() {
 }
 
 /* ── WAITLIST ── */
-function WaitlistSection() {
+function WaitlistSection({ side, setSide }) {
   const [email, setEmail] = useState('')
   const [done, setDone]   = useState(false)
   const [busy, setBusy]   = useState(false)
@@ -363,10 +402,20 @@ function WaitlistSection() {
     const address = email.trim()
     if (!address || !address.includes('@')) return setError('Please enter a valid email address.')
 
+    // Asked rather than guessed. Knowing which side somebody is on decides
+    // what they are invited to on launch day, and a wrong guess means a
+    // creator being told how to fund a campaign.
+    if (WAITLIST_ONLY && !side) {
+      return setError('Please choose whether you are joining as a brand or a creator.')
+    }
+
     setBusy(true); setError('')
     const { error: err } = await supabase.from('waitlist').insert({
       email:      address,
-      source:     'landing',
+      // enqueue_waitlist_launch_emails() branches on exactly these two
+      // values (supabase/waitlist_launch.sql). 'landing' stays the value for
+      // the MVP's own form, where the question is not asked.
+      source:     side ? `site:${side}` : 'landing',
       user_agent: navigator.userAgent,
     })
     setBusy(false)
@@ -381,7 +430,7 @@ function WaitlistSection() {
   }
 
   return (
-    <section className="cov-waitlist">
+    <section className="cov-waitlist" id="waitlist">
       <span className="cov-waitlist__mark">✦</span>
       <h2 className="cov-h2">
         South Africa's most ambitious<br />brands are already waiting.
@@ -391,10 +440,38 @@ function WaitlistSection() {
       </p>
       {done ? (
         <p className="cov-waitlist__success">
-          You're on the list — we'll be in touch soon. ◆
+          You're on the list{side ? ` as ${side === 'brand' ? 'a brand' : 'a creator'}` : ''} — we'll
+          email you when we launch. ◆
         </p>
       ) : (
         <>
+          {/* Only on the public site. The MVP's form sits behind a page where
+              signing up tells us the side already, so asking there would be a
+              question with no purpose. */}
+          {WAITLIST_ONLY && (
+            <div
+              role="group"
+              aria-label="Joining as"
+              style={{
+                display: 'flex', gap: '.5rem', justifyContent: 'center',
+                flexWrap: 'wrap', margin: '0 auto 1rem', maxWidth: '26rem',
+              }}
+            >
+              {[['brand', 'A brand'], ['creator', 'A creator']].map(([id, label]) => (
+                <button
+                  key={id}
+                  type="button"
+                  aria-pressed={side === id}
+                  onClick={() => { setSide(id); setError('') }}
+                  className={`cov-btn cov-btn--lg ${side === id ? 'cov-btn--sage' : 'cov-btn--ghost'}`}
+                  style={{ flex: '1 1 10rem', justifyContent: 'center' }}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          )}
+
           <form className="cov-waitlist__form" onSubmit={submit}>
             <input
               type="email"
@@ -405,7 +482,7 @@ function WaitlistSection() {
               required
             />
             <button type="submit" className="cov-btn cov-btn--sage cov-btn--lg" disabled={busy}>
-              {busy ? 'Adding you…' : 'Request Early Access'}
+              {busy ? 'Adding you…' : WAITLIST_ONLY ? 'Join the waitlist' : 'Request Early Access'}
             </button>
           </form>
           {error && (
@@ -436,7 +513,7 @@ function CovFooter() {
           <a href="#brands">For Brands</a>
           <a href="#creators">For Creators</a>
           <a href="#how">How It Works</a>
-          <Link to="/auth">Get Started</Link>
+          <CTA to="/auth" waitlistLabel="Join the waitlist">Get Started</CTA>
         </div>
         <div className="cov-footer__links-col">
           <span className="cov-footer__col-head">Company</span>
@@ -462,8 +539,13 @@ export default function Landing() {
   const navigate   = useNavigate()
   const isLoggedIn = localStorage.getItem('covo_auth') === 'true'
 
+  // Which side the visitor said they were. Set by any "Join waitlist as a…"
+  // button and read by the form, so clicking one up the page preselects the
+  // answer instead of asking the same question again on arrival.
+  const [side, setSide] = useState(null)
+
   return (
-    <>
+    <PickSideContext.Provider value={setSide}>
       <CovNav isLoggedIn={isLoggedIn} navigate={navigate} />
       <HeroSection />
       <TickerSection />
@@ -471,8 +553,8 @@ export default function Landing() {
       <ForBrandsSection />
       <ForCreatorsSection />
       <HowItWorksSection />
-      <WaitlistSection />
+      <WaitlistSection side={side} setSide={setSide} />
       <CovFooter />
-    </>
+    </PickSideContext.Provider>
   )
 }

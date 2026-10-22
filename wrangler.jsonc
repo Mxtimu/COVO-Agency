@@ -1,0 +1,54 @@
+{
+  // joincovo.app — the public site.
+  //
+  // Deployed as a Workers static-assets site, not Cloudflare Pages.
+  //
+  // Pages has been folded into Workers: `wrangler pages project create` now
+  // delegates to the Workers path and fails, and offers a `--force` flag to
+  // reach the old Pages API instead. Building on an API that announces itself
+  // as the previous version is borrowing a problem, so this uses Workers
+  // directly.
+  //
+  // Only the public site lives here. The MVP app stays on Vercel, and the
+  // Supabase Edge Functions in supabase/functions/ are a different platform
+  // entirely — nothing in this file touches either.
+  //
+  // Deploy with:  npm run deploy:site
+  "name": "joincovo",
+  "compatibility_date": "2026-10-12",
+
+  // The real domain. Without these the Worker is only reachable on its free
+  // built-in *.workers.dev hostname, which is a fallback, not an address to
+  // give anybody.
+  //
+  // custom_domain creates the DNS record as well as the route, so there is
+  // nothing to add by hand in the Cloudflare DNS tab — and nothing to get
+  // wrong there either. www is included because people type it.
+  "routes": [
+    { "pattern": "joincovo.app",     "custom_domain": true },
+    { "pattern": "www.joincovo.app", "custom_domain": true }
+  ],
+
+  "assets": {
+    "directory": "./dist-landing",
+
+    // The landing bundle is a single-page app: /privacy and /terms exist only
+    // inside React Router. Without this, a direct visit or a refresh on those
+    // paths asks Cloudflare for a file that is not there and gets a 404.
+    // This serves index.html for any path with no matching file and lets the
+    // router decide.
+    //
+    // Do NOT also add a `/* /index.html 200` line to public/_headers or a
+    // _redirects file. Workers static assets reads those Pages-style files
+    // too, and the API rejects the combination outright: "Infinite loop
+    // detected in this rule." This setting is the whole fix on its own.
+    "not_found_handling": "single-page-application"
+  },
+
+  // No "main": there is no Worker script. Every request is served from the
+  // asset directory. Adding one later (for security headers, or an API route)
+  // means pointing "main" at it and adding a "binding" under assets.
+  "observability": {
+    "enabled": true
+  }
+}
