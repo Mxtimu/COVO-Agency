@@ -116,6 +116,24 @@ serve(async (req) => {
 
   const brandId = shop?.brand_id ?? null
 
+  // The signature validated, so this request genuinely came from that
+  // store — which is the entire proof of ownership behind brand self-serve
+  // connection. A brand types in a domain and a secret and the connection
+  // sits at 'pending' until this line runs, because only the real store
+  // can produce a correctly signed body.
+  //
+  // Awaited but not fatal: a brand's orders must never be dropped because
+  // a status column could not be stamped. The cost of failure here is a
+  // connection that keeps reading 'pending', which is visible and fixable;
+  // the cost of throwing is a lost sale.
+  if (shop) {
+    const { error: seenError } = await supabase
+      .rpc('mark_shopify_webhook_seen', { p_shop_domain: domain })
+    if (seenError) {
+      console.error('could not stamp webhook_seen for', domain, seenError.message)
+    }
+  }
+
   try {
     switch (topic) {
       case 'orders/create':

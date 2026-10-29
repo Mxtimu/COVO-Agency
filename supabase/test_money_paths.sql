@@ -624,6 +624,130 @@ BEGIN
 
   PERFORM set_config('request.jwt.claims', NULL, true);
 
+  -- ══ 20. Brands connect their own Shopify store ═══════════════════
+  -- Linking a shop used to mean an admin running SQL after the brand
+  -- emailed their signing secret. Now the brand does it, which means the
+  -- function has to refuse everything an admin's judgement used to cover.
+  --
+  -- _fresh became a brand in section 19, so it serves as a second brand
+  -- for the takeover test below.
+  PERFORM set_config('request.jwt.claims',
+    json_build_object('sub', _creator, 'role', 'authenticated')::text, true);
+
+  -- Wrapped because this one RAISES rather than returning a row. The
+  -- distinction is deliberate in the function: a creator reaching a
+  -- brand-only endpoint is a privilege error, not an answer to show
+  -- somebody, while a bad domain or a taken shop are ordinary outcomes
+  -- with a sentence written for the brand to read.
+  --
+  -- Unwrapped, the expected exception escaped to the outer handler and
+  -- aborted every test after it — the whole of section 20 silently never
+  -- ran and the suite reported one crash.
+  BEGIN
+    PERFORM public.brand_connect_shopify(
+      'creatorshop.myshopify.com', 'shpss_0123456789abcdef0123');
+    PERFORM pg_temp.check('20a a creator cannot connect a store', false, 'it was allowed');
+  EXCEPTION WHEN insufficient_privilege THEN
+    PERFORM pg_temp.check('20a a creator cannot connect a store', true, '');
+  END;
+
+  -- The brand connects its own.
+  PERFORM set_config('request.jwt.claims',
+    json_build_object('sub', _brand, 'role', 'authenticated')::text, true);
+
+  SELECT * INTO _r FROM public.brand_connect_shopify(
+    'https://TestShop.myshopify.com/', 'shpss_0123456789abcdef0123');
+  PERFORM pg_temp.check('20b brand connects its own store', _r.out_connected,
+                        COALESCE(_r.out_outcome, ''));
+  -- A pasted scheme, trailing slash and capitals are all normalised away;
+  -- the webhook matches on the lowercase host and nothing else.
+  PERFORM pg_temp.check('20c the domain is normalised',
+                        _r.out_domain = 'testshop.myshopify.com', COALESCE(_r.out_domain, 'NULL'));
+  PERFORM pg_temp.check('20d and starts unverified',
+                        _r.out_state = 'pending', COALESCE(_r.out_state, 'NULL'));
+
+  -- A custom domain never appears on a webhook, so a row keyed on one
+  -- could never be verified. Refused at the door rather than left to
+  -- time out.
+  SELECT * INTO _r FROM public.brand_connect_shopify(
+    'shop.mybrand.co.za', 'shpss_0123456789abcdef0123');
+  PERFORM pg_temp.check('20e a custom domain is refused',
+                        NOT _r.out_connected, COALESCE(_r.out_outcome, ''));
+
+  SELECT * INTO _r FROM public.brand_connect_shopify('other.myshopify.com', 'tooshort');
+  PERFORM pg_temp.check('20f a too-short secret is refused',
+                        NOT _r.out_connected, COALESCE(_r.out_outcome, ''));
+
+  -- ── The one that matters ──
+  -- A second brand must not be able to claim a domain somebody already
+  -- holds. admin_link_shopify_shop reassigns brand_id on conflict, which
+  -- is correct for an admin and would be domain hijacking here: set your
+  -- own secret on a competitor's shop and their real webhooks stop
+  -- validating.
+  PERFORM set_config('request.jwt.claims',
+    json_build_object('sub', _fresh, 'role', 'authenticated')::text, true);
+
+  SELECT * INTO _r FROM public.brand_connect_shopify(
+    'testshop.myshopify.com', 'shpss_ffffffffffffffffffff');
+  PERFORM pg_temp.check('20g another brand cannot take over the domain',
+                        NOT _r.out_connected, COALESCE(_r.out_outcome, 'IT WAS ALLOWED'));
+
+  SELECT brand_id INTO _r FROM public.shopify_shops
+   WHERE shop_domain = 'testshop.myshopify.com';
+  PERFORM pg_temp.check('20h and the owner is unchanged',
+                        _r.brand_id = _brand, '');
+
+  -- Nor can they disconnect it.
+  SELECT * INTO _r FROM public.brand_disconnect_shopify();
+  PERFORM pg_temp.check('20i another brand cannot disconnect it',
+                        NOT _r.out_disconnected, COALESCE(_r.out_outcome, ''));
+
+  -- ── Verification is something only Shopify can cause ──
+  PERFORM set_config('request.jwt.claims',
+    json_build_object('sub', _brand, 'role', 'authenticated')::text, true);
+
+  SELECT * INTO _r FROM public.brand_shopify_status();
+  PERFORM pg_temp.check('20j status reads pending before any webhook',
+                        _r.out_state = 'pending', COALESCE(_r.out_state, 'NULL'));
+
+  -- The signing secret must never come back out of any brand-facing call.
+  SELECT COUNT(*)::INT INTO _n
+  FROM pg_proc p
+  WHERE p.pronamespace = 'public'::regnamespace
+    AND p.proname IN ('brand_shopify_status', 'brand_disconnect_shopify')
+    AND p.prosrc LIKE '%webhook_secret%';
+  PERFORM pg_temp.check_eq('20k no read path returns the signing secret', _n, 0);
+
+  -- A valid signature is the proof, and only the webhook can report one.
+  PERFORM public.mark_shopify_webhook_seen('testshop.myshopify.com');
+
+  SELECT * INTO _r FROM public.brand_shopify_status();
+  PERFORM pg_temp.check('20l a signed webhook verifies the store',
+                        _r.out_state = 'verified', COALESCE(_r.out_state, 'NULL'));
+  PERFORM pg_temp.check('20m and the first order is recorded',
+                        _r.out_last_hook IS NOT NULL, '');
+
+  -- Rotating the secret keeps the store verified: it was proven once, and
+  -- a new secret does not unprove it.
+  SELECT * INTO _r FROM public.brand_connect_shopify(
+    'testshop.myshopify.com', 'shpss_aaaaaaaaaaaaaaaaaaaa');
+  PERFORM pg_temp.check('20n the owner can rotate the secret', _r.out_connected,
+                        COALESCE(_r.out_outcome, ''));
+  PERFORM pg_temp.check('20o and stays verified',
+                        _r.out_state = 'verified', COALESCE(_r.out_state, 'NULL'));
+
+  -- Disconnecting deactivates rather than deletes, because
+  -- commissions.shop_domain refers to it for every order ever attributed.
+  SELECT * INTO _r FROM public.brand_disconnect_shopify();
+  PERFORM pg_temp.check('20p the owner can disconnect', _r.out_disconnected,
+                        COALESCE(_r.out_outcome, ''));
+
+  SELECT COUNT(*)::INT INTO _n FROM public.shopify_shops
+   WHERE shop_domain = 'testshop.myshopify.com';
+  PERFORM pg_temp.check_eq('20q the row survives for the ledger', _n, 1);
+
+  PERFORM set_config('request.jwt.claims', NULL, true);
+
 EXCEPTION WHEN OTHERS THEN
   INSERT INTO _results VALUES ('FIXTURE OR TEST CRASHED', false, SQLERRM);
 END;

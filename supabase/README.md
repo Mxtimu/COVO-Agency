@@ -47,6 +47,7 @@ and the other became a no-op, which is how `commissions` ended up without the
 | 29 | `waitlist_welcome.sql` | Queues a "you're on the list" confirmation on signup. **Needs 24**. Optional — nothing sends until Resend has a verified domain |
 | 30 | `email_worker_schedule.sql` | **Without this nothing ever sends.** pg_cron + pg_net poke `process-email-outbox` every 5 min. **Needs 24** and a `covo_cron_secret` in Vault |
 | 31 | `worker_tickets.sql` | Replaces the CRON_SECRET/Vault pair with single-use tickets the database mints. **Needs 30.** Redeploy `process-email-outbox` after |
+| 32 | `shopify_self_serve.sql` | Brands connect their own store from the dashboard — no admin, no SQL. Ownership proven by the first correctly-signed webhook. **Needs 12.** Redeploy `shopify-order-webhook` after |
 | — | `verify_checks.sql` | **Run this after any change.** Every check as one result set. |
 | — | `verify_hardening.sql` | Runtime proof the guards reject a browser write. Rolls itself back. |
 | — | `test_money_paths.sql` | 44 assertions over the plpgsql that moves money. Rolls itself back. |
